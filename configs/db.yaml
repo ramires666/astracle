@@ -1,0 +1,8 @@
+# Database connection config
+
+db:
+  # Example: "postgresql://ostro:ostro_pass@localhost:55432/ostrofun"
+  url: "postgresql://ostro:ostro_pass@localhost:55432/ostrofun"
+
+  # If TimescaleDB is used, enable hypertable storage
+  use_timescale: false

@@ -1,0 +1,7 @@
+# Training config
+
+training:
+  # Two-stage mode:
+  # 1) MOVE vs NO_MOVE
+  # 2) UP vs DOWN (only for MOVE)
+  two_stage: true

@@ -1,0 +1,58 @@
+# Body list for calculation
+# swe_id:
+# - number -> direct Swiss Ephemeris ID
+# - string -> special object (true_node, mean_node, lilith)
+
+bodies:
+  - id: 0
+    name: Sun
+    swe_id: 0
+    visible: true
+  - id: 1
+    name: Moon
+    swe_id: 1
+    visible: true
+  - id: 2
+    name: Mercury
+    swe_id: 2
+    visible: true
+  - id: 3
+    name: Venus
+    swe_id: 3
+    visible: true
+  - id: 4
+    name: Mars
+    swe_id: 4
+    visible: true
+  - id: 5
+    name: Jupiter
+    swe_id: 5
+    visible: true
+  - id: 6
+    name: Saturn
+    swe_id: 6
+    visible: true
+  - id: 7
+    name: Uranus
+    swe_id: 7
+    visible: true
+  - id: 8
+    name: Neptune
+    swe_id: 8
+    visible: true
+  - id: 9
+    name: Pluto
+    swe_id: 9
+    visible: true
+  - id: 10
+    name: TrueNode
+    swe_id: true_node
+    visible: true
+  - id: 11
+    name: MeanNode
+    swe_id: mean_node
+    visible: true
+  - id: 12
+    name: Lilith
+    swe_id: lilith
+    visible: true

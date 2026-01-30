@@ -1,0 +1,34 @@
+# Market config and downloader settings
+
+market:
+  # Root folder for raw/processed data
+  data_root: "data/market"
+
+  # Data source (currently only binance_vision)
+  source: "binance_vision"
+
+  # Market type: futures_um (default) or spot
+  market_type: "futures_um"
+
+  # Timeframe. For MVP we use 1d (daily candles)
+  timeframe: "1d"
+
+  # Symbol to download (must match subject)
+  symbol: "BTCUSDT"
+
+  # Auto-search earliest available date in archive
+  auto_start: true
+
+  # If auto_start=false, these values are used
+  start_year: 2009
+  start_month: 1
+
+  # If not set, we use the current month
+  end_year: 2026
+  end_month: 1
+
+  # Prefer DB cache (market_daily) before downloading/parsing
+  use_db_cache: true
+
+  # If processed parquet exists, use it and skip download/parse
+  use_parquet_cache: true

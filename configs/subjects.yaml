@@ -1,0 +1,16 @@
+# Subjects config
+# Define "birth" for each subject so you can change it without code edits.
+
+# Active subject by default
+active_subject_id: btc
+
+# Subjects list
+subjects:
+  - subject_id: btc
+    symbol: BTCUSDT
+    exchange: binance_futures
+    # IMPORTANT: set the correct birth datetime
+    birth_dt_utc: "2009-01-03T18:15:05Z"
+    # Birth geo coordinates (not used in MVP yet)
+    birth_lat: 60.11
+    birth_lon: 25.18

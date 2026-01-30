@@ -1,0 +1,25 @@
+version: "3.9"
+
+# Run Postgres in a separate container, store DB data in project folder.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ostrofun-postgres
+    restart: unless-stopped
+
+    # Expose DB port so apps can connect.
+    ports:
+      - "55432:5432"
+
+    # Base DB parameters.
+    environment:
+      POSTGRES_DB: ostrofun
+      POSTGRES_USER: ostro
+      POSTGRES_PASSWORD: ostro_pass
+
+    # Store DB data on project disk, not inside container.
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+      # Initialize schema on first start.
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/00_schema.sql:ro

@@ -1,0 +1,35 @@
+# Oracle label config
+
+labels:
+  # Gaussian smoothing strength
+  sigma: 3
+
+  # Threshold mode:
+  #   - "fixed": use threshold as-is
+  #   - "auto": auto-pick threshold to target MOVE share
+  threshold_mode: "auto"
+
+  # Slope threshold (used when threshold_mode="fixed")
+  threshold: 0.0005
+
+  # Target MOVE share (|slope| > threshold) for auto mode
+  target_move_share: 0.5
+
+  # Optional clamps for auto threshold
+  threshold_min: 0.0
+  threshold_max: null
+
+  # Price mode: "log" or "raw"
+  price_mode: "raw"
+
+  # Binary trend mode: treat sideways as continuation of previous direction
+  binary_trend: false
+
+  # If there is no prior direction, fallback to "up" or "down"
+  binary_fallback: "up"
+
+  # Prediction horizon (days)
+  horizon: 1
+
+  # Auto-pick sigma/threshold for DOWN vs UP balance (notebook)
+  auto_grid_select: true

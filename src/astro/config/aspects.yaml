@@ -1,0 +1,18 @@
+# Standard major aspects
+
+aspects:
+  - name: Conjunction
+    degree: 0
+    orb: 8
+  - name: Sextile
+    degree: 60
+    orb: 3
+  - name: Square
+    degree: 90
+    orb: 3
+  - name: Trine
+    degree: 120
+    orb: 5
+  - name: Opposition
+    degree: 180
+    orb: 5

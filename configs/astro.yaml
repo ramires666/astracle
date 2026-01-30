@@ -1,0 +1,19 @@
+# Astro data config
+
+astro:
+  # Path to Swiss Ephemeris (sweph) files
+  # Example for Windows: "C:/sweph/ephe"
+  ephe_path: "src/astro/engine/sweph/ephe"
+
+  # Files with bodies and aspects
+  bodies_path: "src/astro/config/bodies.yaml"
+  aspects_path: "src/astro/config/aspects.yaml"
+
+  # Time of day for the daily slice (UTC)
+  daily_time_utc: "00:00:00"
+
+  # Coordinate center: "geo" (geocentric) or "helio" (heliocentric)
+  center: "helio"
+
+  # Houses are not used in MVP
+  enable_houses: false

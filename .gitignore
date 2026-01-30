@@ -1,0 +1,30 @@
+# Игнорируем системные и временные файлы IDE/редакторов
+.idea/
+.vscode/
+
+# Игнорируем локальные виртуальные окружения
+.venv/
+venv/
+.python-version
+
+# Игнорируем кеши и артефакты Python
+__pycache__/
+*.py[cod]
+*.pyd
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Логи и временные файлы
+*.log
+*.tmp
+*.zip
+*.se1
+
+# Данные Postgres в проекте
+data/postgres/
+/src/astro/engine/sweph/ephe/
+old-project/

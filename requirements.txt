@@ -1,0 +1,19 @@
+# pip layer: only what is not in conda-forge on Windows
+backtesting==0.6.5
+bokeh==3.8.1
+bottle==0.13.4
+clr-loader==0.2.9
+contourpy==1.3.3
+lightweight-charts==2.1
+pillow==12.0.0
+proxy-tools==0.1.0
+pyarrow==23.0.0
+pybit==5.13.0
+pycryptodome==3.23.0
+pysocks==1.7.1
+pyswisseph==2.10.3.2
+pythonnet==3.0.5
+pywebview==6.1
+tqdm==4.67.1
+websocket-client==1.9.0
+xyzservices==2025.11.0
