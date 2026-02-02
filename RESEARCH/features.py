@@ -79,7 +79,14 @@ def build_full_features(
     # ШАГ 1: Фильтруем исключённые тела (если указаны)
     # ─────────────────────────────────────────────────────────────────────────────
     if exclude_bodies and len(exclude_bodies) > 0:
-        exclude_set = set(exclude_bodies)
+        # Расширяем список исключений для учета префиксов (geo_, helio_)
+        # Это важно для режимов coord_mode="both" и "helio"
+        exclude_set = set()
+        for body in exclude_bodies:
+            exclude_set.add(body)
+            exclude_set.add(f"geo_{body}")
+            exclude_set.add(f"helio_{body}")
+            
         df_bodies = df_bodies[~df_bodies["body"].isin(exclude_set)].copy()
         
         if df_aspects is not None and not df_aspects.empty:

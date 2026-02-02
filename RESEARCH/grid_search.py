@@ -69,6 +69,18 @@ class GridSearchConfig:
       ["both"]  — ОБЕ системы (удваивает количество признаков!)
       ["geo", "helio", "both"] — перебрать все три варианта
       
+    • max_exclude - ABLATION: исключение астро-тел (NEW!)
+      0 — не исключать тела (только orb/gauss/coord)
+      1 — пробовать исключать по 1 телу
+      2 — пробовать исключать до 2 тел
+      4 — пробовать исключать до 4 тел (по умолчанию)
+      
+      Это КОМБИНАТОРНЫЙ взрыв! С 11 телами:
+      - max_exclude=1: 11 вариантов
+      - max_exclude=2: 66 вариантов
+      - max_exclude=3: 231 вариант
+      - max_exclude=4: 561 вариант
+      
     • max_combos - ограничение количества комбинаций (для тестов)
     
     • model_params - параметры XGBoost модели
@@ -80,7 +92,8 @@ class GridSearchConfig:
         orb_multipliers: List[float] = [0.8, 1.0, 1.2],
         gauss_windows: List[int] = [101, 151, 201],
         gauss_stds: List[float] = [30.0, 50.0, 70.0],
-        coord_modes: List[str] = ["geo"],  # NEW: geo, helio, both
+        coord_modes: List[str] = ["geo"],  # geo, helio, both
+        max_exclude: int = 0,  # NEW: 0 = без ablation, 4 = исключать до 4 тел
         max_combos: Optional[int] = None,
         model_params: Optional[Dict] = None,
     ):
@@ -90,7 +103,8 @@ class GridSearchConfig:
         self.orb_multipliers = orb_multipliers
         self.gauss_windows = gauss_windows
         self.gauss_stds = gauss_stds
-        self.coord_modes = coord_modes  # NEW: список режимов координат
+        self.coord_modes = coord_modes
+        self.max_exclude = max_exclude  # NEW: максимальное количество исключаемых тел
         self.max_combos = max_combos
         self.model_params = model_params or {
             "n_estimators": 500,    # Количество деревьев в ансамбле
@@ -109,6 +123,7 @@ def evaluate_combo(
     orb_mult: float,
     gauss_window: int,
     gauss_std: float,
+    exclude_bodies: Optional[List[str]] = None,  # NEW: список исключаемых тел
     device: str = "cpu",
     model_params: Optional[Dict] = None,
 ) -> Dict:
@@ -121,7 +136,7 @@ def evaluate_combo(
     1. Создаёт разметку (UP/DOWN) с заданными gauss_window и gauss_std
     2. Вычисляет аспекты с заданным orb_mult
     3. Вычисляет фазы Луны и элонгации планет
-    4. Строит признаки и объединяет с разметкой
+    4. Строит признаки (исключая exclude_bodies!) и объединяет с разметкой
     5. Обучает XGBoost и возвращает метрики
     ═══════════════════════════════════════════════════════════════════════════════
     
@@ -151,9 +166,13 @@ def evaluate_combo(
     df_phases = calculate_phases_for_dates(bodies_by_date, progress=False)
     
     # ─────────────────────────────────────────────────────────────────────────────
-    # ШАГ 4: Строим полную матрицу признаков (включая фазы)
+    # ШАГ 4: Строим полную матрицу признаков (исключая указанные тела!)
     # ─────────────────────────────────────────────────────────────────────────────
-    df_features = build_full_features(df_bodies, df_aspects, df_phases=df_phases)
+    df_features = build_full_features(
+        df_bodies, df_aspects, 
+        df_phases=df_phases,
+        exclude_bodies=exclude_bodies  # NEW: исключаем указанные тела
+    )
     
     # Merge with labels
     df_dataset = merge_features_with_labels(df_features, df_labels)
@@ -177,8 +196,8 @@ def evaluate_combo(
         **params
     )
     
-    # Tune threshold
-    best_t, _ = tune_threshold(model, X_val, y_val, metric="bal_acc")
+    # Tune threshold по recall_min (а не bal_acc)
+    best_t, _ = tune_threshold(model, X_val, y_val, metric="recall_min")
     
     # Predict on test
     y_pred = predict_with_threshold(model, X_test, threshold=best_t)
@@ -202,6 +221,7 @@ def evaluate_combo(
         "orb_mult": orb_mult,
         "gauss_window": gauss_window,
         "gauss_std": gauss_std,
+        "exclude_bodies": exclude_bodies or [],  # NEW: какие тела исключены
         "threshold": best_t,
         "recall_down": recall_down,
         "recall_up": recall_up,
@@ -213,6 +233,7 @@ def evaluate_combo(
         "f1_gap": abs(f1_down - f1_up),
         "f1_macro": metrics["f1_macro"],
         "bal_acc": metrics["bal_acc"],
+        "mcc": metrics["mcc"],  # NEW: MCC метрика
         "summary": metrics["summary"],
     }
 
@@ -273,26 +294,46 @@ def run_grid_search(
     _, device = check_cuda_available()
     print(f"🖥️ Устройство: {device}")
     
+    # Run timestamp for checkpoints
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
     # ─────────────────────────────────────────────────────────────────────────────
     # ШАГ 3: Инициализация Swiss Ephemeris
     # ─────────────────────────────────────────────────────────────────────────────
     settings = init_ephemeris()
     
     # ─────────────────────────────────────────────────────────────────────────────
-    # ШАГ 4: Генерируем ВСЕ комбинации параметров
+    # ШАГ 4: Генерируем ВСЕ комбинации параметров (включая ablation!)
     # ─────────────────────────────────────────────────────────────────────────────
+    from itertools import combinations
+    
+    # Получаем список всех тел для ablation
+    all_bodies = get_all_body_names(settings)
+    
+    # Генерируем комбинации исключений (если max_exclude > 0)
+    exclusion_combos = [[]]  # Начинаем с пустого списка (baseline)
+    
+    if config.max_exclude > 0:
+        for n_exclude in range(1, config.max_exclude + 1):
+            for combo in combinations(all_bodies, n_exclude):
+                exclusion_combos.append(list(combo))
+    
+    # Генерируем ВСЕ комбинации: (coord_mode, orb, gw, gs, exclude_bodies)
     combos = []
     for coord_mode in config.coord_modes:
         for orb in config.orb_multipliers:
             for gw in config.gauss_windows:
                 for gs in config.gauss_stds:
-                    combos.append((coord_mode, orb, gw, gs))
+                    for excl in exclusion_combos:
+                        combos.append((coord_mode, orb, gw, gs, excl))
     
     # Ограничиваем количество комбинаций если задано
     if config.max_combos and len(combos) > config.max_combos:
         combos = combos[:config.max_combos]
     
     print(f"\n📊 Всего комбинаций для перебора: {len(combos)}")
+    if config.max_exclude > 0:
+        print(f"   (включая {len(exclusion_combos)} вариантов ablation: до {config.max_exclude} исключаемых тел)")
     
     # ─────────────────────────────────────────────────────────────────────────────
     # ШАГ 5: Предварительно рассчитываем позиции планет для ВСЕХ режимов
@@ -320,8 +361,23 @@ def run_grid_search(
     print("=" * 80)
     
     results = []
-    for i, (coord_mode, orb, gw, gs) in enumerate(combos):
-        print(f"\n[{i+1}/{len(combos)}] coord={coord_mode}, orb={orb}, gw={gw}, gs={gs}")
+    
+    # Track best result so far
+    best_so_far = {
+        "score": -1.0,
+        "gap": 1.0,
+        "combo": None,
+        "metrics": {}
+    }
+
+    for i, (coord_mode, orb, gw, gs, excl) in enumerate(combos):
+        # Format params compactly
+        excl_str = f"-[{len(excl)}]" if excl else ""
+        if excl and len(excl) <= 2:
+            excl_str = f"-[{','.join(excl)}]"
+            
+        params_str = f"[{i+1}/{len(combos)}] {coord_mode} | O={orb} W={gw} S={gs} {excl_str}"
+        # print(f"{params_str:<60}", end=" ")  # OLD: Removed to avoid partial print
         
         try:
             # Получаем закэшированные данные для этого coord_mode
@@ -331,19 +387,62 @@ def run_grid_search(
             res = evaluate_combo(
                 df_market, df_bodies, bodies_by_date, settings,
                 orb, gw, gs,
+                exclude_bodies=excl if excl else None,
                 device=device,
                 model_params=config.model_params,
             )
-            res["coord_mode"] = coord_mode  # Добавляем режим координат в результат
+            res["coord_mode"] = coord_mode
             results.append(res)
             
             if "error" not in res:
-                print(f"  → RECALL_MIN={res['recall_min']:.3f} | RECALL_GAP={res['recall_gap']:.3f} | bal_acc={res['bal_acc']:.3f}")
+                r_min = res['recall_min']
+                r_gap = res['recall_gap']
+                mcc = res.get('mcc', 0)
+                
+                # Check directly if this is best
+                is_best = False
+                if r_min > best_so_far["score"]:
+                    is_best = True
+                elif r_min == best_so_far["score"] and r_gap < best_so_far["gap"]:
+                    is_best = True
+                    
+                if is_best:
+                    best_so_far["score"] = r_min
+                    best_so_far["gap"] = r_gap
+                    best_so_far["combo"] = f"{coord_mode} O={orb} W={gw} S={gs} {excl_str}"
+                    best_so_far["metrics"] = f"R_MIN={r_min:.3f} GAP={r_gap:.3f} MCC={mcc:.3f}"
+                
+                # ATOMIC PRINT
+                msg = f"{params_str:<60} → R_UP={res['recall_up']:.3f} R_DOWN={res['recall_down']:.3f} MCC={mcc:.3f}"
+                print(msg)
+                print(f"   🏆 BEST: {best_so_far['metrics']} ({best_so_far['combo']})")
+                print()  # Пустая строка разделитель
+            else:
+                print(f"{params_str:<60} → ERROR: {res.get('error')}")
+
+            # ─────────────────────────────────────────────────────────────────────────────
+            # CHECKPOINT: Save every 100 iterations
+            # ─────────────────────────────────────────────────────────────────────────────
+            if (i + 1) % 100 == 0:
+                try:
+                    ckpt_dir = cfg.reports_dir / "checkpoints"
+                    ckpt_dir.mkdir(exist_ok=True, parents=True)
+                    
+                    ckpt_path = ckpt_dir / f"grid_search_{run_timestamp}_checkpoint.parquet"
+                    
+                    # Convert to DF and save
+                    # Note: Convert columns with complex types (lists) to string if parquet fails?
+                    # Parquet handles lists usually.
+                    pd.DataFrame(results).to_parquet(ckpt_path, index=False)
+                    print(f"   💾 Checkpoint saved: {ckpt_path.name}")
+                except Exception as e:
+                    print(f"   ⚠️ Checkpoint error: {e}")
+
         except Exception as e:
-            print(f"  ❌ ERROR: {e}")
+            print(f"{params_str:<60} → CRASH: {e}")
             results.append({
                 "coord_mode": coord_mode, "orb_mult": orb, "gauss_window": gw, "gauss_std": gs,
-                "error": str(e)
+                "exclude_bodies": excl, "error": str(e)
             })
     
     # Convert to DataFrame
