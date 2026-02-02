@@ -16,8 +16,10 @@ import requests
 
 
 # Base URLs for Binance Vision
-BASE_URL_FUTURES_UM = "https://data.binance.vision/data/futures/um/monthly"
-BASE_URL_SPOT = "https://data.binance.vision/data/spot/monthly"
+BASE_URL_FUTURES_UM_MONTHLY = "https://data.binance.vision/data/futures/um/monthly"
+BASE_URL_FUTURES_UM_DAILY = "https://data.binance.vision/data/futures/um/daily"
+BASE_URL_SPOT_MONTHLY = "https://data.binance.vision/data/spot/monthly"
+BASE_URL_SPOT_DAILY = "https://data.binance.vision/data/spot/daily"
 
 
 def _iter_with_progress(items: Iterable, enabled: bool, desc: str):
@@ -36,13 +38,18 @@ def _iter_with_progress(items: Iterable, enabled: bool, desc: str):
     return tqdm(items, desc=desc, unit="month")
 
 
-def _get_base_url(market_type: str) -> str:
+def _get_base_url(market_type: str, frequency: str = "monthly") -> str:
     """
-    Pick base URL by market type.
+    Pick base URL by market type and frequency.
     """
+    market_type = (market_type or "").strip().lower()
+    frequency = (frequency or "monthly").strip().lower()
+    if frequency not in {"monthly", "daily"}:
+        raise ValueError("frequency must be 'monthly' or 'daily'")
+
     if market_type == "spot":
-        return BASE_URL_SPOT
-    return BASE_URL_FUTURES_UM
+        return BASE_URL_SPOT_DAILY if frequency == "daily" else BASE_URL_SPOT_MONTHLY
+    return BASE_URL_FUTURES_UM_DAILY if frequency == "daily" else BASE_URL_FUTURES_UM_MONTHLY
 
 
 def generate_monthly_dates(
@@ -63,6 +70,21 @@ def generate_monthly_dates(
         # Move to next month
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
 
+    return dates
+
+
+def generate_daily_dates(
+    start_date: datetime,
+    end_date: datetime,
+) -> List[str]:
+    """
+    Generate daily date strings from start to end (YYYY-MM-DD).
+    """
+    dates: List[str] = []
+    cur = start_date
+    while cur <= end_date:
+        dates.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
     return dates
 
 
@@ -101,7 +123,7 @@ def find_first_available_month(
     Scan forward from the start year until a file exists.
     """
     now = datetime.utcnow()
-    base_url = _get_base_url(market_type)
+    base_url = _get_base_url(market_type, frequency="monthly")
 
     if verbose:
         print(f"[AUTO] Searching first month for {symbol} ({market_type}, {interval})")
@@ -168,11 +190,12 @@ def download_monthly_1d(
     progress: bool = False,
     verbose: bool = True,
     print_urls: bool = False,
+    skip_missing: bool = True,
 ) -> List[Path]:
     """
     Download all monthly 1d archives for the given period.
     """
-    base_url = _get_base_url(market_type)
+    base_url = _get_base_url(market_type, frequency="monthly")
     interval = "1d"
 
     dest_folder.mkdir(parents=True, exist_ok=True)
@@ -189,6 +212,56 @@ def download_monthly_1d(
     downloaded: List[Path] = []
     for year, month in _iter_with_progress(dates, progress, desc="download 1d"):
         filename = f"{symbol}-{interval}-{year}-{month}.zip"
+        url = f"{base_url}/klines/{symbol}/{interval}/{filename}"
+        dest_path = dest_folder / filename
+
+        if dest_path.exists():
+            if verbose:
+                print(f"[SKIP] {filename}")
+            downloaded.append(dest_path)
+            continue
+
+        if skip_missing and not _check_exists(url):
+            if verbose:
+                print(f"[MISS] {filename}")
+            continue
+
+        if download_file(url, dest_path, verbose=verbose, print_urls=print_urls):
+            downloaded.append(dest_path)
+
+    return downloaded
+
+
+def download_daily_1d(
+    symbol: str,
+    market_type: str,
+    start_date: datetime,
+    end_date: datetime,
+    dest_folder: Path,
+    progress: bool = False,
+    verbose: bool = True,
+    print_urls: bool = False,
+) -> List[Path]:
+    """
+    Download daily 1d archives for a date range.
+    """
+    base_url = _get_base_url(market_type, frequency="daily")
+    interval = "1d"
+
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    dates = generate_daily_dates(start_date, end_date)
+
+    if verbose:
+        print(
+            f"[INFO] Download daily {symbol} {interval} ({market_type}) "
+            f"from {start_date.date()} to {end_date.date()}"
+        )
+        print(f"[INFO] Destination folder: {dest_folder}")
+        print(f"[INFO] Days count: {len(dates)}")
+
+    downloaded: List[Path] = []
+    for day in _iter_with_progress(dates, progress, desc="download 1d daily"):
+        filename = f"{symbol}-{interval}-{day}.zip"
         url = f"{base_url}/klines/{symbol}/{interval}/{filename}"
         dest_path = dest_folder / filename
 
@@ -216,9 +289,12 @@ def download_1d_auto(
     progress: bool = False,
     verbose: bool = True,
     print_urls: bool = False,
+    daily_tail: bool = True,
 ) -> List[Path]:
     """
     Smart mode: find the earliest available month and download up to current.
+    If monthly archive for a month is missing, optionally download daily archives
+    starting from the first missing month.
     """
     now = datetime.utcnow()
     end_year = end_year or now.year
@@ -238,15 +314,51 @@ def download_1d_auto(
         start_year, start_month = found
 
     dest = data_root / "raw" / "klines_1d"
-    return download_monthly_1d(
-        symbol=symbol,
-        market_type=market_type,
-        start_year=start_year,
-        start_month=start_month,
-        end_year=end_year,
-        end_month=end_month,
-        dest_folder=dest,
-        progress=progress,
-        verbose=verbose,
-        print_urls=print_urls,
-    )
+
+    # Download monthly archives that exist; remember the first missing month.
+    missing_first: Optional[Tuple[int, int]] = None
+    dates = generate_monthly_dates(start_year, start_month, end_year, end_month)
+    base_url_monthly = _get_base_url(market_type, frequency="monthly")
+
+    downloaded: List[Path] = []
+    for year, month in _iter_with_progress(dates, progress, desc="download 1d"):
+        filename = f"{symbol}-1d-{year}-{month}.zip"
+        url = f"{base_url_monthly}/klines/{symbol}/1d/{filename}"
+        dest_path = dest / filename
+
+        if dest_path.exists():
+            if verbose:
+                print(f"[SKIP] {filename}")
+            downloaded.append(dest_path)
+            continue
+
+        # If the file does not exist on the server, mark first missing month.
+        if not _check_exists(url):
+            if missing_first is None:
+                missing_first = (year, int(month))
+            if verbose:
+                print(f"[MISS] {filename}")
+            continue
+
+        if download_file(url, dest_path, verbose=verbose, print_urls=print_urls):
+            downloaded.append(dest_path)
+
+    # Daily tail for the first missing month (typically current month)
+    if daily_tail and missing_first is not None:
+        miss_year, miss_month = missing_first
+        start_date = datetime(miss_year, miss_month, 1)
+        # Daily archives are typically available with a 1-day delay.
+        end_date = now - timedelta(days=1)
+        if start_date.date() <= end_date.date():
+            downloaded += download_daily_1d(
+                symbol=symbol,
+                market_type=market_type,
+                start_date=start_date,
+                end_date=end_date,
+                dest_folder=dest,
+                progress=progress,
+                verbose=verbose,
+                print_urls=print_urls,
+            )
+
+    return downloaded

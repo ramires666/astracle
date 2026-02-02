@@ -24,11 +24,14 @@ market:
   start_month: 1
 
   # If not set, we use the current month
-  end_year: 2026
-  end_month: 1
+  end_year: null
+  end_month: null
 
   # Prefer DB cache (market_daily) before downloading/parsing
   use_db_cache: true
+
+  # Write market_daily into DB after building (upsert)
+  write_db: true
 
   # If processed parquet exists, use it and skip download/parse
   use_parquet_cache: true

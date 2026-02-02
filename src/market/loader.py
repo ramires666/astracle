@@ -20,6 +20,17 @@ def load_market_daily_parquet(path: Path) -> pd.DataFrame:
     return df
 
 
+def load_market_daily_csv(path: Path) -> pd.DataFrame:
+    """
+    Load CSV with market_daily (date, close).
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    df = pd.read_csv(path)
+    return df
+
+
 def save_market_daily_csv(df: pd.DataFrame, path: Path) -> Path:
     """
     Save market_daily to CSV.

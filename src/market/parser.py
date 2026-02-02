@@ -174,10 +174,18 @@ def parse_klines_folder_1d(
     df_all = df_all.sort_values("date").reset_index(drop=True)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df_all.to_parquet(output_path, index=False)
-    if verbose:
-        print(f"[OK] Saved: {output_path} ({len(df_all)} rows)")
-    return output_path
+    try:
+        df_all.to_parquet(output_path, index=False)
+        if verbose:
+            print(f"[OK] Saved: {output_path} ({len(df_all)} rows)")
+        return output_path
+    except Exception as e:
+        csv_path = output_path.with_suffix(".csv")
+        df_all.to_csv(csv_path, index=False)
+        if verbose:
+            print(f"[WARN] Parquet failed: {e}")
+            print(f"[OK] Saved CSV: {csv_path} ({len(df_all)} rows)")
+        return csv_path
 
 
 def parse_klines_folder_1d_ohlcv(

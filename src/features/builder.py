@@ -44,31 +44,6 @@ def build_body_features(df_bodies: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
-def build_aspect_features(df_aspects: pd.DataFrame) -> pd.DataFrame:
-    """
-    Aspect aggregates per day:
-    - count per aspect
-    - min orb per aspect
-    """
-    if df_aspects.empty:
-        return pd.DataFrame(columns=["date"])
-
-    grouped = df_aspects.groupby(["date", "aspect"]).agg(
-        count=("aspect", "count"),
-        min_orb=("orb", "min"),
-    ).reset_index()
-
-    # Pivot to a wide table
-    count_pivot = grouped.pivot(index="date", columns="aspect", values="count")
-    count_pivot.columns = [f"aspect_count_{c}" for c in count_pivot.columns]
-
-    orb_pivot = grouped.pivot(index="date", columns="aspect", values="min_orb")
-    orb_pivot.columns = [f"aspect_min_orb_{c}" for c in orb_pivot.columns]
-
-    features = pd.concat([count_pivot, orb_pivot], axis=1).reset_index()
-    return features
-
-
 def _canonicalize_pairs(df: pd.DataFrame, left_col: str, right_col: str) -> pd.DataFrame:
     """
     Ensure pair order is stable by sorting body names in each row.
@@ -156,7 +131,7 @@ def build_features_daily(
     df_aspects: pd.DataFrame,
     df_transit_aspects: pd.DataFrame | None = None,
     include_pair_aspects: bool = True,
-    include_agg_aspects: bool = False,
+    include_transit_aspects: bool = False,
 ) -> pd.DataFrame:
     """
     Full feature build (bodies + aspects + transit->natal aspects).
@@ -168,12 +143,8 @@ def build_features_daily(
         pair_features = build_aspect_pair_features(df_aspects)
         if not pair_features.empty:
             merged = pd.merge(merged, pair_features, on="date", how="left")
-    if include_agg_aspects:
-        aspect_features = build_aspect_features(df_aspects)
-        if not aspect_features.empty:
-            merged = pd.merge(merged, aspect_features, on="date", how="left")
 
-    if df_transit_aspects is not None and not df_transit_aspects.empty:
+    if include_transit_aspects and df_transit_aspects is not None and not df_transit_aspects.empty:
         transit_features = build_transit_aspect_features(df_transit_aspects)
         merged = pd.merge(merged, transit_features, on="date", how="left")
 

@@ -21,7 +21,7 @@ import pandas as pd
 from src.common.config import load_yaml, load_subjects
 from src.market.downloader import download_1d_auto
 from src.market.parser import parse_klines_folder_1d
-from src.market.loader import load_market_daily_parquet, load_market_daily_psql
+from src.market.loader import load_market_daily_parquet, load_market_daily_psql, load_market_daily_csv
 from src.astro.engine.settings import AstroSettings
 from src.astro.engine.calculator import set_ephe_path, calculate_bodies, calculate_daily_bodies
 from src.astro.engine.aspects import calculate_aspects, calculate_transit_aspects
@@ -89,29 +89,47 @@ def run_mvp():
     raw_dir = data_root / "raw" / "klines_1d"
     processed_dir = data_root / "processed"
     market_parquet = processed_dir / f"{subject.subject_id}_market_daily.parquet"
+    market_csv = processed_dir / f"{subject.subject_id}_market_daily.csv"
 
     df_market = None
+    df_db = None
     use_db_cache = bool(market_cfg.get("use_db_cache", False))
     if use_db_cache:
         try:
             cfg_db = load_yaml("configs/db.yaml")
             db_url = cfg_db.get("db", {}).get("url", "")
             if db_url:
-                df_market = load_market_daily_psql(subject.subject_id, db_url)
-                if df_market.empty:
-                    df_market = None
+                df_db = load_market_daily_psql(subject.subject_id, db_url)
+                if df_db.empty:
+                    df_db = None
                 else:
-                    print(f"[MVP] Using market data from DB: {len(df_market)} rows")
+                    print(f"[MVP] Using market data from DB: {len(df_db)} rows")
             else:
                 print("[WARN] configs/db.yaml missing db.url, DB cache disabled.")
         except Exception as e:
             print(f"[WARN] DB cache failed, fallback to files. Reason: {e}")
-            df_market = None
+            df_db = None
 
     use_parquet_cache = bool(market_cfg.get("use_parquet_cache", True))
-    if df_market is None and use_parquet_cache and market_parquet.exists():
-        print(f"[MVP] Using cached parquet: {market_parquet}")
-        df_market = load_market_daily_parquet(market_parquet)
+    df_file = None
+    if use_parquet_cache:
+        if market_parquet.exists():
+            try:
+                print(f"[MVP] Using cached parquet: {market_parquet}")
+                df_file = load_market_daily_parquet(market_parquet)
+            except Exception as e:
+                print(f"[WARN] Failed to read parquet: {e}")
+                df_file = None
+        if df_file is None and market_csv.exists():
+            print(f"[MVP] Using cached CSV: {market_csv}")
+            df_file = load_market_daily_csv(market_csv)
+
+    if df_db is not None and df_file is not None:
+        df_market = pd.concat([df_db, df_file], ignore_index=True).drop_duplicates(subset=["date"], keep="last")
+    elif df_db is not None:
+        df_market = df_db
+    elif df_file is not None:
+        df_market = df_file
 
     if df_market is None:
         print("[MVP] Downloading 1d data...")
@@ -143,6 +161,8 @@ def run_mvp():
     )
     time_utc = _parse_time_utc(astro_cfg["daily_time_utc"])
     center = astro_cfg.get("center", "geo")
+    include_pair_aspects = bool(astro_cfg.get("include_pair_aspects", True))
+    include_transit_aspects = bool(astro_cfg.get("include_transit_aspects", False))
 
     birth_dt = _parse_birth_dt_utc(subject.birth_dt_utc)
     natal_bodies = calculate_bodies(birth_dt, settings.bodies, center=center)
@@ -158,7 +178,9 @@ def run_mvp():
     for d in _iter_with_progress(dates, True, desc="astro days"):
         bodies = calculate_daily_bodies(d, time_utc, settings.bodies, center=center)
         aspects = calculate_aspects(bodies, settings.aspects)
-        transit_hits = calculate_transit_aspects(bodies, natal_bodies, settings.aspects)
+        transit_hits = []
+        if include_transit_aspects:
+            transit_hits = calculate_transit_aspects(bodies, natal_bodies, settings.aspects)
 
         for b in bodies:
             bodies_rows.append({
@@ -183,16 +205,17 @@ def run_mvp():
                 "is_applying": a.is_applying,
             })
 
-        for h in transit_hits:
-            transit_rows.append({
-                "date": h.date,
-                "transit_body": h.transit_body,
-                "natal_body": h.natal_body,
-                "aspect": h.aspect,
-                "orb": h.orb,
-                "is_exact": h.is_exact,
-                "is_applying": h.is_applying,
-            })
+        if include_transit_aspects:
+            for h in transit_hits:
+                transit_rows.append({
+                    "date": h.date,
+                    "transit_body": h.transit_body,
+                    "natal_body": h.natal_body,
+                    "aspect": h.aspect,
+                    "orb": h.orb,
+                    "is_exact": h.is_exact,
+                    "is_applying": h.is_applying,
+                })
 
     df_bodies = pd.DataFrame(bodies_rows)
     df_aspects = pd.DataFrame(aspects_rows)
@@ -201,11 +224,18 @@ def run_mvp():
     astro_dir = data_root / "processed"
     df_bodies.to_parquet(astro_dir / f"{subject.subject_id}_astro_bodies.parquet", index=False)
     df_aspects.to_parquet(astro_dir / f"{subject.subject_id}_astro_aspects.parquet", index=False)
-    df_transits.to_parquet(astro_dir / f"{subject.subject_id}_transit_aspects.parquet", index=False)
+    if include_transit_aspects:
+        df_transits.to_parquet(astro_dir / f"{subject.subject_id}_transit_aspects.parquet", index=False)
 
     # --- Features ---
     print("[MVP] Building features...")
-    df_features = build_features_daily(df_bodies, df_aspects, df_transits)
+    df_features = build_features_daily(
+        df_bodies,
+        df_aspects,
+        df_transits if include_transit_aspects else None,
+        include_pair_aspects=include_pair_aspects,
+        include_transit_aspects=include_transit_aspects,
+    )
     df_features.to_parquet(astro_dir / f"{subject.subject_id}_features.parquet", index=False)
 
     # --- Labels ---

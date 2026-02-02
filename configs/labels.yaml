@@ -1,18 +1,24 @@
 # Oracle label config
 
 labels:
-  # Gaussian smoothing strength
+  # Label mode:
+  # - "oracle_gauss": 3-class labels (DOWN/SIDEWAYS/UP) from Gaussian smoothing
+  # - "balanced_future_return" / "balanced_detrended": binary balanced labels
+  label_mode: "balanced_detrended"
+
+  # Gaussian smoothing strength (oracle mode only)
   sigma: 3
 
-  # Threshold mode:
+  # Threshold mode (oracle mode only):
   #   - "fixed": use threshold as-is
   #   - "auto": auto-pick threshold to target MOVE share
   threshold_mode: "auto"
 
-  # Slope threshold (used when threshold_mode="fixed")
+  # Slope threshold (oracle mode only, used when threshold_mode="fixed")
   threshold: 0.0005
 
-  # Target MOVE share (|slope| > threshold) for auto mode
+  # Target MOVE share (|slope| > threshold) for auto mode (oracle),
+  # and also used for balanced labeling sample share
   target_move_share: 0.5
 
   # Optional clamps for auto threshold
@@ -22,7 +28,7 @@ labels:
   # Price mode: "log" or "raw"
   price_mode: "raw"
 
-  # Binary trend mode: treat sideways as continuation of previous direction
+  # Binary trend mode (oracle mode only)
   binary_trend: false
 
   # If there is no prior direction, fallback to "up" or "down"
@@ -31,5 +37,41 @@ labels:
   # Prediction horizon (days)
   horizon: 1
 
+  # Balanced labels (binary) params
+  gauss_window: 201
+  gauss_std: 50.0
+  # Fill smoothing edges to keep full date range
+  balanced_edge_fill: true
+
+  # Balanced grid search (binary)
+  balanced_grid_search: true
+  balanced_grid_apply_best: true
+  balanced_grid_windows: [76, 101, 151, 201,251]
+  balanced_grid_stds: [30, 50, 70]
+  balanced_grid_move_shares: [0.2, 0.3, 0.4, 0.5]
+
+  # Grid search for label balance (oracle)
+  grid_search: true
+  grid_threshold_mode: "quantile"  # "quantile" or "range"
+  grid_sigma_min: 2
+  grid_sigma_max: 8
+  grid_threshold_min: 0.0001
+  grid_threshold_max: 0.001
+  grid_steps: 7
+  grid_quantile_min: 0.1
+  grid_quantile_max: 0.9
+
+  # Open label plots automatically (distribution + shaded price)
+  open_plots: true
+
   # Auto-pick sigma/threshold for DOWN vs UP balance (notebook)
   auto_grid_select: true
+
+  # Write dxcharts HTML report for labels
+  write_report: true
+
+  # Downsample report payload (1 point per N days). Use 1 to disable.
+  report_sample_every_days: 7
+
+  # Max points in HTML report payload (safety cap for slow browsers)
+  report_max_points: 1500

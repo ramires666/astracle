@@ -28,3 +28,6 @@ htmlcov/
 data/postgres/
 /src/astro/engine/sweph/ephe/
 old-project/
+*.parquet
+data/market/
+models_artifacts/
