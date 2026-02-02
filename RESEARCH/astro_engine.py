@@ -20,6 +20,10 @@ from src.astro.engine.aspects import calculate_aspects, calculate_transit_aspect
 from src.astro.engine.models import AspectConfig, BodyPosition
 
 from .config import cfg, resolve_path
+from .numba_utils import (
+    compute_pairwise_angles, filter_aspects_by_orb, 
+    is_aspect_applying, warmup_jit, check_numba_available
+)
 
 
 def init_ephemeris() -> AstroSettings:
@@ -275,6 +279,136 @@ def calculate_bodies_for_dates_multi(
             print(f"✅ Объединено: {len(df_bodies)} записей из {len(all_dfs)} систем координат")
     
     return df_bodies, geo_bodies_by_date, helio_bodies_by_date
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# КЭШИРОВАНИЕ УГЛОВ (ОПТИМИЗАЦИЯ ПРОИЗВОДИТЕЛЬНОСТИ)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def precompute_angles_for_dates(
+    bodies_by_date: dict,
+    progress: bool = True,
+) -> dict:
+    """
+    ═══════════════════════════════════════════════════════════════════════════════
+    ПРЕДВАРИТЕЛЬНЫЙ РАСЧЁТ ВСЕХ УГЛОВ МЕЖДУ ПЛАНЕТАМИ
+    ═══════════════════════════════════════════════════════════════════════════════
+    
+    Эта функция вычисляет ВСЕ попарные углы между планетами ОДИН раз.
+    Результат можно использовать многократно для разных орбисов.
+    
+    ЗАЧЕМ ЭТО НУЖНО:
+    ─────────────────────────────────────────────────────────────────────────────
+    При Grid Search мы перебираем разные orb_mult (0.5, 1.0, 1.5...).
+    Углы между планетами НЕ МЕНЯЮТСЯ от орбиса — меняется только фильтрация!
+    Вычислив углы один раз, мы экономим ~70% времени на аспектах.
+    
+    Args:
+        bodies_by_date: Словарь {date: [BodyPosition, ...]}
+        progress: Показывать прогресс-бар
+        
+    Returns:
+        Словарь {date: {
+            'body_names': ['Sun', 'Moon', ...],
+            'longitudes': np.array(...),
+            'speeds': np.array(...),
+            'angles': np.array([[...]]),  # 2D матрица попарных углов
+        }}
+    """
+    angles_cache = {}
+    
+    iterator = tqdm(bodies_by_date.items(), desc="Precomputing angles") if progress else bodies_by_date.items()
+    
+    for d, bodies in iterator:
+        body_names = [b.body for b in bodies]
+        longitudes = np.array([b.lon for b in bodies], dtype=np.float64)
+        speeds = np.array([b.speed for b in bodies], dtype=np.float64)
+        
+        # Используем Numba-оптимизированную функцию
+        angles_matrix = compute_pairwise_angles(longitudes)
+        
+        angles_cache[d] = {
+            'date': d,
+            'body_names': body_names,
+            'longitudes': longitudes,
+            'speeds': speeds,
+            'angles': angles_matrix,
+        }
+    
+    return angles_cache
+
+
+def calculate_aspects_from_cache(
+    angles_cache: dict,
+    settings: AstroSettings,
+    orb_mult: float = 1.0,
+    prefix: str = "",
+    progress: bool = False,
+) -> pd.DataFrame:
+    """
+    ═══════════════════════════════════════════════════════════════════════════════
+    БЫСТРЫЙ РАСЧЁТ АСПЕКТОВ ИЗ КЭША УГЛОВ
+    ═══════════════════════════════════════════════════════════════════════════════
+    
+    Использует предвычисленные углы для быстрой фильтрации по орбису.
+    Это ~3-5x быстрее, чем пересчитывать углы каждый раз.
+    
+    Args:
+        angles_cache: Результат precompute_angles_for_dates()
+        settings: AstroSettings с конфигурацией аспектов
+        orb_mult: Множитель орбиса
+        prefix: Префикс для имён планет (geo_, helio_)
+        progress: Показывать прогресс-бар
+        
+    Returns:
+        DataFrame с найденными аспектами
+    """
+    from src.astro.engine.aspects import EXACT_EPS
+    
+    # Подготавливаем массивы аспектов
+    aspect_degrees = np.array([a.degree for a in settings.aspects], dtype=np.float64)
+    aspect_orbs = np.array([a.orb * orb_mult for a in settings.aspects], dtype=np.float64)
+    aspect_names = [a.name for a in settings.aspects]
+    
+    aspects_rows = []
+    
+    iterator = tqdm(angles_cache.items(), desc=f"Filtering aspects (orb×{orb_mult})") if progress else angles_cache.items()
+    
+    for d, cache_entry in iterator:
+        body_names = cache_entry['body_names']
+        longitudes = cache_entry['longitudes']
+        speeds = cache_entry['speeds']
+        angles_matrix = cache_entry['angles']
+        
+        # Используем Numba-оптимизированную фильтрацию
+        i_idx, j_idx, asp_idx, orb_vals = filter_aspects_by_orb(
+            angles_matrix, aspect_degrees, aspect_orbs
+        )
+        
+        # Конвертируем результаты в строки DataFrame
+        for k in range(len(i_idx)):
+            i, j = i_idx[k], j_idx[k]
+            a_idx = asp_idx[k]
+            orb = orb_vals[k]
+            
+            is_exact = orb <= EXACT_EPS
+            applying = is_aspect_applying(
+                longitudes[i], longitudes[j],
+                speeds[i], speeds[j],
+                aspect_degrees[a_idx]
+            )
+            
+            aspects_rows.append({
+                "date": d,
+                "p1": prefix + body_names[i],
+                "p2": prefix + body_names[j],
+                "aspect": aspect_names[a_idx],
+                "orb": orb,
+                "is_exact": is_exact,
+                "is_applying": applying,
+            })
+    
+    return pd.DataFrame(aspects_rows)
 
 
 def calculate_aspects_for_dates(
