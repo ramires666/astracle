@@ -22,17 +22,52 @@ def build_full_features(
     df_bodies: pd.DataFrame,
     df_aspects: pd.DataFrame,
     df_transits: Optional[pd.DataFrame] = None,
+    df_phases: Optional[pd.DataFrame] = None,  # NEW: фазы Луны и элонгации
     include_pair_aspects: bool = True,
     include_transit_aspects: bool = False,
     exclude_bodies: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
-    Build full feature matrix from astro data.
+    ═══════════════════════════════════════════════════════════════════════════════
+    ПОСТРОЕНИЕ ПОЛНОЙ МАТРИЦЫ ПРИЗНАКОВ ИЗ АСТРОЛОГИЧЕСКИХ ДАННЫХ
+    ═══════════════════════════════════════════════════════════════════════════════
+    
+    Эта функция объединяет ВСЕ виды астрологических признаков:
+    
+    1. ПОЗИЦИИ ТЕЛ (df_bodies):
+       - Долгота планеты (Sun_lon, Moon_lon, Mars_lon...)
+       - Скорость движения (Sun_speed, Moon_speed...)
+       - Ретроградность (Mars_is_retro, Mercury_is_retro...)
+       - Склонение (declination)
+       - Знак зодиака (sign_idx 0-11)
+    
+    2. АСПЕКТЫ (df_aspects):
+       - Есть ли аспект между парой планет сегодня
+       - Орбис (точность) аспекта
+       
+    3. ТРАНЗИТЫ (df_transits, опционально):
+       - Аспекты транзитных планет к натальным
+       
+    4. ФАЗЫ И ЭЛОНГАЦИИ (df_phases, НОВОЕ!):
+       - moon_phase_angle - угол фазы Луны (0-360°)
+       - moon_phase_ratio - нормализованная фаза (0=новолуние, 0.5=полнолуние)
+       - moon_illumination - освещённость Луны (0-1)
+       - lunar_day - лунный день (1-29.5)
+       - Mercury_elongation - элонгация Меркурия от Солнца
+       - Venus_elongation - элонгация Венеры
+       - ... и т.д.
+    
+    EXCLUDE_BODIES:
+    ─────────────────────────────────────────────────────────────────────────────
+    Список тел для исключения (используется при grid search).
+    Например: ["Pluto", "Neptune"] — исключить Плутон и Нептун из признаков.
+    ═══════════════════════════════════════════════════════════════════════════════
     
     Args:
         df_bodies: Body positions DataFrame
         df_aspects: Pair aspects DataFrame
         df_transits: Transit aspects DataFrame (optional)
+        df_phases: Moon phases and planet elongations DataFrame (optional)
         include_pair_aspects: Include body pair aspects
         include_transit_aspects: Include transit-to-natal aspects
         exclude_bodies: List of body names to exclude (for grid search)
@@ -40,7 +75,9 @@ def build_full_features(
     Returns:
         Feature DataFrame with date column + feature columns
     """
-    # Filter out excluded bodies if specified
+    # ─────────────────────────────────────────────────────────────────────────────
+    # ШАГ 1: Фильтруем исключённые тела (если указаны)
+    # ─────────────────────────────────────────────────────────────────────────────
     if exclude_bodies and len(exclude_bodies) > 0:
         exclude_set = set(exclude_bodies)
         df_bodies = df_bodies[~df_bodies["body"].isin(exclude_set)].copy()
@@ -56,7 +93,9 @@ def build_full_features(
                   df_transits["natal_body"].isin(exclude_set))
             ].copy()
     
-    # Use existing feature builder
+    # ─────────────────────────────────────────────────────────────────────────────
+    # ШАГ 2: Строим базовые признаки (позиции + аспекты)
+    # ─────────────────────────────────────────────────────────────────────────────
     df_features = build_features_daily(
         df_bodies,
         df_aspects,
@@ -64,6 +103,27 @@ def build_full_features(
         include_pair_aspects=include_pair_aspects,
         include_transit_aspects=include_transit_aspects,
     )
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # ШАГ 3: НОВОЕ - Добавляем фазы Луны и элонгации планет
+    # ─────────────────────────────────────────────────────────────────────────────
+    if df_phases is not None and not df_phases.empty:
+        # Убеждаемся что date в нужном формате
+        df_phases = df_phases.copy()
+        df_phases["date"] = pd.to_datetime(df_phases["date"])
+        df_features["date"] = pd.to_datetime(df_features["date"])
+        
+        # Объединяем по дате
+        df_features = pd.merge(
+            df_features,
+            df_phases,
+            on="date",
+            how="left"
+        )
+        
+        # Заполняем пропуски нулями
+        phase_cols = [c for c in df_phases.columns if c != "date"]
+        df_features[phase_cols] = df_features[phase_cols].fillna(0)
     
     return df_features
 
@@ -73,14 +133,17 @@ def merge_features_with_labels(
     df_labels: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Merge features with labels on date.
+    Merge features with labels on date (LEFT JOIN + FORWARD-FILL).
+    
+    All feature days are kept. Labels are forward-filled so each day
+    inherits the previous label until a new label appears.
     
     Args:
         df_features: Feature DataFrame with 'date' column
         df_labels: Labels DataFrame with 'date' and 'target' columns
     
     Returns:
-        Merged DataFrame with features and target
+        Merged DataFrame with features and target (NO GAPS)
     """
     df_features = df_features.copy()
     df_labels = df_labels.copy()
@@ -88,21 +151,31 @@ def merge_features_with_labels(
     df_features["date"] = pd.to_datetime(df_features["date"])
     df_labels["date"] = pd.to_datetime(df_labels["date"])
     
-    # Merge on date (inner join - only dates with both)
+    # LEFT JOIN: keep ALL feature dates
     df_merged = pd.merge(
         df_features,
         df_labels[["date", "target"]],
         on="date",
-        how="inner"
+        how="left"  # CHANGED from 'inner' to 'left'
     )
+    
+    # Sort by date and forward-fill labels
+    df_merged = df_merged.sort_values("date").reset_index(drop=True)
+    df_merged["target"] = df_merged["target"].ffill()  # State continues until change
+    
+    # Drop initial rows without any label (before first label appears)
+    first_label_idx = df_merged["target"].first_valid_index()
+    if first_label_idx is not None and first_label_idx > 0:
+        df_merged = df_merged.iloc[first_label_idx:].reset_index(drop=True)
     
     # Remove duplicates
     if df_merged["date"].duplicated().any():
         df_merged = df_merged.drop_duplicates(subset=["date"]).reset_index(drop=True)
     
-    df_merged = df_merged.sort_values("date").reset_index(drop=True)
+    # Convert target to int
+    df_merged["target"] = df_merged["target"].astype(int)
     
-    print(f"Merged dataset: {len(df_merged)} samples")
+    print(f"Merged dataset: {len(df_merged)} samples (ALL days, forward-filled)")
     print(f"Features: {len([c for c in df_merged.columns if c not in ['date', 'target']])}")
     
     return df_merged

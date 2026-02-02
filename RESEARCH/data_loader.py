@@ -24,7 +24,7 @@ def load_market_data(
         end_date: Optional end date filter (YYYY-MM-DD)
     
     Returns:
-        DataFrame with columns: date, open, high, low, close, volume
+        DataFrame with columns: date, close
     """
     subject_id = subject_id or cfg.active_subject_id
     db_url = cfg.db_url
@@ -32,9 +32,9 @@ def load_market_data(
     if not db_url:
         raise ValueError("Database URL not configured in configs/db.yaml")
     
-    # Build query
+    # Build query (market_daily only has date and close)
     query = """
-        SELECT date, open, high, low, close, volume 
+        SELECT date, close 
         FROM market_daily 
         WHERE subject_id = %s
     """

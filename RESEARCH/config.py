@@ -70,8 +70,14 @@ class Config:
         
         # Active subject
         self.active_subject_id = self.subjects.get("active_subject_id", "")
-        subjects_list = self.subjects.get("subjects", {})
-        self.subject = subjects_list.get(self.active_subject_id, {})
+        subjects_list = self.subjects.get("subjects", [])
+        
+        # subjects is a list, find by subject_id
+        self.subject = {}
+        for s in subjects_list:
+            if s.get("subject_id") == self.active_subject_id:
+                self.subject = s
+                break
         
         # Database URL
         self.db_url = (self.db.get("db") or {}).get("url", "")

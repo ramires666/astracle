@@ -103,7 +103,7 @@ def plot_price_with_labels(
     figsize: tuple = (14, 5),
 ):
     """
-    Plot price with label shading and optional Gaussian smoothing.
+    Plot price with label shading (forward-filled, no gaps).
     
     Args:
         df_market: Full market DataFrame
@@ -113,64 +113,57 @@ def plot_price_with_labels(
         gauss_window, gauss_std: Gaussian params (for label)
         figsize: Figure size
     """
+    # Merge labels onto all market dates, then forward-fill
+    df_plot = df_market[["date", "close"]].copy()
+    df_plot["date"] = pd.to_datetime(df_plot["date"])
+    
+    df_labels_copy = df_labels[["date", "target"]].copy()
+    df_labels_copy["date"] = pd.to_datetime(df_labels_copy["date"])
+    
+    df_plot = df_plot.merge(df_labels_copy, on="date", how="left")
+    df_plot = df_plot.sort_values("date").reset_index(drop=True)
+    df_plot["target"] = df_plot["target"].ffill()  # Forward-fill: state continues until change
+    
     if price_mode == "log":
-        price_series = np.log(df_market["close"]).astype(float)
+        price_series = np.log(df_plot["close"]).astype(float)
         y_label = "log(price)"
     else:
-        price_series = df_market["close"].astype(float)
+        price_series = df_plot["close"].astype(float)
         y_label = "price"
     
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    ax.plot(df_market["date"], price_series, label="price", linewidth=0.8)
+    ax.plot(df_plot["date"], price_series, label="price", linewidth=0.8, color="black")
     
     if smooth is not None and smooth.notna().any():
         label = f"Gauss(w={gauss_window}, std={gauss_std})" if gauss_window else "Gaussian"
         ax.plot(df_market["date"], smooth, label=label, linewidth=1.2)
     
-    # Shade labels
-    dates = pd.to_datetime(df_market["date"])
-    label_series = pd.Series(index=dates, dtype="float")
+    # Shade with axvspan - each day extends to the next
+    dates = df_plot["date"].reset_index(drop=True)
+    targets = df_plot["target"].values
     
-    label_map = df_labels[["date", "target"]].copy()
-    label_map["date"] = pd.to_datetime(label_map["date"])
-    label_series.loc[label_map["date"]] = label_map["target"].values
+    up_added = False
+    down_added = False
     
-    color_map = {0: ("DOWN", "tab:red"), 1: ("UP", "tab:green")}
-    
-    current_label = None
-    start_dt = None
-    prev_dt = None
-    used_labels = set()
-    
-    for dt, lab in label_series.items():
-        if pd.isna(lab):
-            if current_label is not None and prev_dt is not None:
-                name, color = color_map.get(int(current_label), ("?", "tab:gray"))
-                ax.axvspan(start_dt, prev_dt, color=color, alpha=0.08,
-                          label=name if name not in used_labels else None)
-                used_labels.add(name)
-                current_label = None
-                start_dt = None
-            prev_dt = dt
+    for i in range(len(dates)):
+        target = targets[i]
+        if pd.isna(target):
             continue
         
-        lab = int(lab)
-        if current_label is None:
-            current_label = lab
-            start_dt = dt
-        elif lab != current_label:
-            name, color = color_map.get(int(current_label), ("?", "tab:gray"))
-            ax.axvspan(start_dt, prev_dt, color=color, alpha=0.08,
-                      label=name if name not in used_labels else None)
-            used_labels.add(name)
-            current_label = lab
-            start_dt = dt
-        prev_dt = dt
-    
-    if current_label is not None and prev_dt is not None:
-        name, color = color_map.get(int(current_label), ("?", "tab:gray"))
-        ax.axvspan(start_dt, prev_dt, color=color, alpha=0.08,
-                  label=name if name not in used_labels else None)
+        # Extend to next date (or +1 day for last)
+        if i < len(dates) - 1:
+            end_date = dates.iloc[i + 1]
+        else:
+            end_date = dates.iloc[i] + pd.Timedelta(days=1)
+        
+        if target == 1:
+            ax.axvspan(dates.iloc[i], end_date, color="green", alpha=0.15,
+                      label="UP" if not up_added else None)
+            up_added = True
+        else:
+            ax.axvspan(dates.iloc[i], end_date, color="red", alpha=0.15,
+                      label="DOWN" if not down_added else None)
+            down_added = True
     
     ax.set_title("Price with labels")
     ax.set_xlabel("Date")
@@ -186,30 +179,46 @@ def plot_last_n_days(
     price_mode: str = "raw",
     figsize: tuple = (14, 5),
 ):
-    """Plot last N days with labels."""
-    df_market_last = df_market.tail(n_days).copy()
-    df_labels_last = df_labels[
-        df_labels["date"].isin(df_market_last["date"])
-    ].copy()
+    """Plot last N days with labels (forward-filled to cover all days)."""
+    # First merge labels onto ALL market dates, then ffill, then slice
+    df_full = df_market[["date", "close"]].copy()
+    df_full["date"] = pd.to_datetime(df_full["date"])
+    
+    df_labels_copy = df_labels[["date", "target"]].copy()
+    df_labels_copy["date"] = pd.to_datetime(df_labels_copy["date"])
+    
+    df_full = df_full.merge(df_labels_copy, on="date", how="left")
+    df_full = df_full.sort_values("date").reset_index(drop=True)
+    df_full["target"] = df_full["target"].ffill()  # Forward-fill on full history
+    
+    # Now slice to last N days
+    df_plot = df_full.tail(n_days).copy()
     
     if price_mode == "log":
-        price_series = np.log(df_market_last["close"]).astype(float)
+        price_series = np.log(df_plot["close"]).astype(float)
         y_label = "log(price)"
     else:
-        price_series = df_market_last["close"].astype(float)
+        price_series = df_plot["close"].astype(float)
         y_label = "price"
     
     fig, ax = plt.subplots(1, 1, figsize=figsize)
-    ax.plot(df_market_last["date"], price_series, label="price", linewidth=1.2, color="tab:blue")
+    ax.plot(df_plot["date"], price_series, label="price", linewidth=1.2, color="tab:blue")
     
-    # Shade labels
-    if len(df_labels_last) > 0:
-        up_mask = df_labels_last["target"] == 1
-        down_mask = df_labels_last["target"] == 0
-        
-        for _, row in df_labels_last.iterrows():
-            color = "green" if row["target"] == 1 else "red"
-            ax.axvspan(row["date"], row["date"], color=color, alpha=0.3)
+    # Shade labels with full background (no gaps)
+    dates = pd.to_datetime(df_plot["date"]).reset_index(drop=True)
+    targets = df_plot["target"].values
+    
+    for i in range(len(dates)):
+        target = targets[i]
+        if pd.isna(target):
+            continue
+        color = "green" if target == 1 else "red"
+        # Extend to next date (or +1 day for last point)
+        if i < len(dates) - 1:
+            end_date = dates.iloc[i + 1]
+        else:
+            end_date = dates.iloc[i] + pd.Timedelta(days=1)
+        ax.axvspan(dates.iloc[i], end_date, color=color, alpha=0.3)
     
     ax.set_title(f"Last {n_days} days")
     ax.set_xlabel("Date")
@@ -218,7 +227,8 @@ def plot_last_n_days(
     plt.tight_layout()
     plt.show()
     
-    print(f"Last {n_days} days: {len(df_labels_last)} labeled out of {len(df_market_last)}")
+    n_labeled = df_plot["target"].notna().sum()
+    print(f"Last {n_days} days: {n_labeled} labeled (forward-filled) out of {len(df_plot)}")
 
 
 def plot_future_return_distribution(
@@ -279,7 +289,7 @@ def plot_predictions(
     figsize: tuple = (12, 7),
 ):
     """
-    Plot predictions with price.
+    Plot predictions with price (continuous shading, no gaps).
     
     Args:
         df_test: Test DataFrame with date and close
@@ -288,29 +298,51 @@ def plot_predictions(
         price_mode: 'log' or 'raw'
         figsize: Figure size
     """
-    dates = pd.to_datetime(df_test["date"]).to_numpy()
+    dates = pd.to_datetime(df_test["date"]).reset_index(drop=True)
     
     if price_mode == "log":
-        close = np.log(df_test["close"]).to_numpy()
+        close = np.log(df_test["close"]).values
         y_label = "log(price)"
     else:
-        close = df_test["close"].to_numpy()
+        close = df_test["close"].values
         y_label = "price"
     
-    up_pred = y_pred == 1
-    down_pred = y_pred == 0
+    def shade_continuous(ax, dates, labels, title):
+        """Shade with axvspan - each label extends to next date."""
+        ax.plot(dates, close, color="black", linewidth=1.2, label="Price")
+        
+        up_added = False
+        down_added = False
+        
+        for i in range(len(dates)):
+            label = labels[i]
+            # Extend to next date (or +1 day for last)
+            if i < len(dates) - 1:
+                end_date = dates.iloc[i + 1]
+            else:
+                end_date = dates.iloc[i] + pd.Timedelta(days=1)
+            
+            if label == 1:
+                ax.axvspan(dates.iloc[i], end_date, color="green", alpha=0.15, 
+                          label="UP" if not up_added else None)
+                up_added = True
+            else:
+                ax.axvspan(dates.iloc[i], end_date, color="red", alpha=0.15,
+                          label="DOWN" if not down_added else None)
+                down_added = True
+        
+        ax.set_title(title)
+        ax.set_ylabel(y_label)
+        ax.legend(loc="upper left")
     
     if y_true is not None:
         fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
-        shade_up_down(axes[0], dates, close, up_pred, down_pred, "Predicted", y_label)
-        
-        up_true = y_true == 1
-        down_true = y_true == 0
-        shade_up_down(axes[1], dates, close, up_true, down_true, "True Labels", y_label)
+        shade_continuous(axes[0], dates, y_pred, "Predicted")
+        shade_continuous(axes[1], dates, y_true, "True Labels")
         axes[1].set_xlabel("Date")
     else:
         fig, ax = plt.subplots(figsize=(12, 4))
-        shade_up_down(ax, dates, close, up_pred, down_pred, "Predicted", y_label)
+        shade_continuous(ax, dates, y_pred, "Predicted")
         ax.set_xlabel("Date")
     
     plt.tight_layout()

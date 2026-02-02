@@ -1,0 +1,30 @@
+# RESEARCH module dependencies
+# Install with: pip install -r requirements.txt
+# Or with conda: conda install -c conda-forge --file requirements.txt
+
+# Core data science
+numpy
+pandas
+scipy
+
+# Machine Learning
+xgboost
+scikit-learn
+joblib
+
+# Visualization
+matplotlib
+seaborn
+
+# Progress bars
+tqdm
+
+# Database
+psycopg2-binary
+pyarrow
+
+# Astronomy
+pyswisseph
+
+# Jupyter / Interactive mode (for VS Code)
+ipykernel

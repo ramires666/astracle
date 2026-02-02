@@ -271,7 +271,8 @@ model = train_xgb_model(
 
 # %%
 # Tune threshold on validation set
-best_threshold, best_score = tune_threshold(model, X_val, y_val, metric="bal_acc")
+# ТЕПЕРЬ по умолчанию оптимизирует recall_min (качество худшего класса)
+best_threshold, best_score = tune_threshold(model, X_val, y_val)  # metric="recall_min" по умолчанию
 
 # %% [markdown]
 # ## 8. Evaluate & Visualize
@@ -294,26 +295,159 @@ plot_feature_importance(imp_df)
 
 # %%
 # Predictions on test set
-plot_predictions(test_df, y_pred, y_true=y_test, price_mode="log")
+# Теперь df_dataset уже содержит все дни с forward-filled метками
+# Нужно только добавить close для визуализации
+import pandas as pd  # На случай если запускается отдельно
+
+test_df_plot = test_df.copy()
+test_df_plot["date"] = pd.to_datetime(test_df_plot["date"])
+test_df_plot = test_df_plot.merge(
+    df_market[["date", "close"]].assign(date=lambda x: pd.to_datetime(x["date"])), 
+    on="date", 
+    how="left"
+)
+
+plot_predictions(test_df_plot, y_pred, y_true=y_test, price_mode="log")
 
 # %% [markdown]
 # ## 9. (Optional) Grid Search
 # 
-# Uncomment the cell below to run grid search over orb and gaussian parameters.
+# Выберите один из вариантов ниже:
+# - **run_grid_search** — основной поиск (coord + gauss + orb)
+# - **run_full_grid_search** — полный поиск с body ablation
+# - **run_body_ablation_search** — только ablation тел
 
 # %%
-# # GRID SEARCH (uncomment to run)
-# from RESEARCH.grid_search import run_grid_search, GridSearchConfig, get_best_params
+# Настройки отображения DataFrame (чтобы видеть все колонки)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+pd.set_option('display.expand_frame_repr', False)
+pd.set_option('display.max_colwidth', None)
+
+# %%
+# ══════════════════════════════════════════════════════════════════════════════════
+# 🔧 НАСТРОЙКИ GRID SEARCH — ВСЕ ПАРАМЕТРЫ В ОДНОМ МЕСТЕ
+# ══════════════════════════════════════════════════════════════════════════════════
+#
+# Просто измените значения ниже и запустите Grid Search!
+# Система автоматически переберёт ВСЕ комбинации параметров.
+#
+# ══════════════════════════════════════════════════════════════════════════════════
+
+from RESEARCH.grid_search import GridSearchConfig, run_grid_search
+
+GRID_CONFIG = GridSearchConfig(
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 🌍 СИСТЕМА КООРДИНАТ (откуда смотрим на планеты)
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 
+    # "geo"   = Земля в центре (классическая астрология, что видим с Земли)
+    # "helio" = Солнце в центре (научная точка зрения, реальные орбиты)
+    # "both"  = ОБЕ СИСТЕМЫ СРАЗУ (удваивает количество признаков!)
+    #
+    # Совет: начните с ["geo"], потом попробуйте ["geo", "helio", "both"]
+    #        чтобы найти лучшую систему
+    #
+    coord_modes=["geo"],  # ← ИЗМЕНИТЕ: ["geo"], ["helio"], ["both"], или все сразу
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 🔮 ОРБИСЫ АСПЕКТОВ (насколько точно планеты должны быть в аспекте)
+    # ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Орбис = допустимое отклонение от точного угла аспекта.
+    # Например, соединение = 0°, но если орбис 8°, то 0°±8° считается соединением.
+    #
+    # 0.5 = УЗКИЕ орбисы (только очень точные аспекты, меньше шума)
+    # 1.0 = СТАНДАРТНЫЕ орбисы (как в классической астрологии)
+    # 1.5 = ШИРОКИЕ орбисы (больше аспектов найдётся, но и больше шума)
+    #
+    orb_multipliers=[0.8, 1.0, 1.2],  # ← ИЗМЕНИТЕ: можно [0.5], [1.0], [0.5, 1.0, 1.5]
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 📈 ОКНО СГЛАЖИВАНИЯ ГАУССА (сколько дней "видит" алгоритм разметки)
+    # ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Это размер окна в ДНЯХ для определения "тренд UP или DOWN".
+    # Чем больше окно — тем более долгосрочные тренды ловим.
+    #
+    #  51 = ~2.5 месяца (чувствительно к коротким движениям)
+    # 101 = ~5 месяцев 
+    # 151 = ~7.5 месяцев
+    # 201 = ~10 месяцев (только большие тренды, игнорирует мелкие)
+    #
+    gauss_windows=[101, 151, 201],  # ← ИЗМЕНИТЕ: можно [101], [51, 101, 201]
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 🔔 ШИРИНА КОЛОКОЛА ГАУССА (насколько "размыта" граница UP/DOWN)
+    # ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Это "ширина" сглаживающего колокола.
+    # Чем меньше — тем резче переходы между UP и DOWN.
+    # Чем больше — тем плавнее, но менее чувствительно к быстрым изменениям.
+    #
+    # 20.0 = УЗКИЙ колокол (резкие переходы, чувствителен к шуму)
+    # 50.0 = СРЕДНИЙ колокол (баланс)
+    # 80.0 = ШИРОКИЙ колокол (плавные переходы, подходит для долгосрока)
+    #
+    gauss_stds=[30.0, 50.0, 70.0],  # ← ИЗМЕНИТЕ: можно [50.0], [20.0, 50.0, 80.0]
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 🛑 ЛИМИТ КОМБИНАЦИЙ (для тестовых запусков)
+    # ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Grid Search перебирает ВСЕ комбинации. Например:
+    #   3 coord_modes × 3 orb × 3 window × 3 std = 81 комбинация!
+    #
+    # Если хотите быстро проверить что всё работает — поставьте лимит.
+    # None = без лимита (перебрать ВСЁ)
+    #
+    max_combos=None,  # ← ИЗМЕНИТЕ: None (всё) или число, например 5 для теста
+    
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 🌳 ПАРАМЕТРЫ МОДЕЛИ XGBoost (обычно менять не нужно)
+    # ──────────────────────────────────────────────────────────────────────────────
+    #
+    # Эти параметры для обучения модели. Дефолты работают хорошо.
+    # Меняйте только если понимаете что делаете.
+    #
+    model_params={
+        "n_estimators": 500,      # Количество деревьев (больше = точнее, но дольше)
+        "max_depth": 3,           # Глубина дерева (меньше = меньше переобучения)
+        "learning_rate": 0.03,    # Скорость обучения (меньше = стабильнее)
+        "subsample": 0.8,         # Доля данных на каждое дерево
+        "colsample_bytree": 0.8,  # Доля признаков на каждое дерево
+    },
+)
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# 🚀 ЗАПУСК GRID SEARCH
+# ══════════════════════════════════════════════════════════════════════════════════
+results_df = run_grid_search(df_market, GRID_CONFIG)
+
+# Показать топ-20 лучших комбинаций
+print("\n🏆 Топ-20 лучших комбинаций:")
+print(results_df.head(20))
+
+# %%
+# EVALUATE AND VISUALIZE BEST RESULT
+from RESEARCH.grid_search import evaluate_and_plot_best
+
+best_result = evaluate_and_plot_best(df_market, results_df.iloc[0])
+
+# %%
+# BODY ABLATION ONLY (uncomment to run)
+# Use current params, test all body exclusion combinations
+
+# from RESEARCH.grid_search import run_body_ablation_search
 # 
-# grid_config = GridSearchConfig(
-#     orb_multipliers=[0.8, 1.0, 1.2],
-#     gauss_windows=[101, 151, 201],
-#     gauss_stds=[30.0, 50.0, 70.0],
+# ablation_df = run_body_ablation_search(
+#     df_market,
+#     orb_mult=ORB_MULTIPLIER,
+#     gauss_window=LABEL_CONFIG["gauss_window"],
+#     gauss_std=LABEL_CONFIG["gauss_std"],
+#     max_exclude=3,  # Try removing up to 3 bodies
 # )
-# 
-# results_df = run_grid_search(df_market, config=grid_config)
-# best_params = get_best_params(results_df)
-# print("Best params:", best_params)
 
 # %% [markdown]
 # ## 10. Save Model
