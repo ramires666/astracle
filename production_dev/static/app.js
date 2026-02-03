@@ -139,33 +139,28 @@ async function checkModelHealth() {
 }
 
 /**
- * Fetch historical BTC prices from CoinGecko API.
- * This provides context for the prediction chart.
+ * Fetch historical BTC prices from our project database.
+ * Uses the same data loading functions as initial data collection.
  */
 async function fetchHistoricalPrices() {
     try {
-        const url = `${CONFIG.COINGECKO_API}/coins/bitcoin/market_chart`;
-        const params = new URLSearchParams({
-            vs_currency: 'usd',
-            days: CONFIG.HISTORICAL_DAYS,
-            interval: 'daily',
-        });
+        const url = `${CONFIG.API_BASE}/api/historical?days=${CONFIG.HISTORICAL_DAYS}`;
 
-        const response = await fetch(`${url}?${params}`);
+        const response = await fetch(url);
 
         if (!response.ok) {
-            throw new Error(`CoinGecko API error: ${response.status}`);
+            throw new Error(`API error: ${response.status}`);
         }
 
         const data = await response.json();
 
         // Transform to our format
-        state.historicalPrices = data.prices.map(([timestamp, price]) => ({
-            date: new Date(timestamp).toISOString().split('T')[0],
-            price: price,
+        state.historicalPrices = data.prices.map(item => ({
+            date: item.date,
+            price: item.price,
         }));
 
-        console.log(`📈 Loaded ${state.historicalPrices.length} days of historical data`);
+        console.log(`📈 Loaded ${state.historicalPrices.length} days of historical data from database`);
 
     } catch (error) {
         console.error('Failed to fetch historical prices:', error);

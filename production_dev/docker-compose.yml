@@ -1,0 +1,63 @@
+# =============================================================================
+# Bitcoin Astro Predictor - Docker Compose Configuration
+# =============================================================================
+#
+# Usage:
+#   Development:  docker-compose up
+#   Production:   docker-compose -f docker-compose.yml up -d
+#
+# Port: 9742 (non-standard, unoccupied)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  btc-astro-predictor:
+    build:
+      context: ..
+      dockerfile: production_dev/Dockerfile
+    container_name: btc-astro-predictor
+    ports:
+      - "9742:9742"
+    environment:
+      - PYTHONPATH=/app
+      - PORT=9742
+      # Database connection (use host.docker.internal for local PostgreSQL)
+      - DATABASE_URL=${DATABASE_URL:-}
+    volumes:
+      # Mount model artifacts for updates without rebuild
+      - ../models_artifacts:/app/models_artifacts:ro
+      # Mount ephemeris data
+      - ../data/ephe:/app/data/ephe:ro
+      # Mount configs for database connection
+      - ../configs:/app/configs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9742/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "app.name=btc-astro-predictor"
+      - "app.description=Bitcoin Astrology Prediction Service"
+      - "app.version=1.0.0"
+
+# =============================================================================
+# Optional: Add PostgreSQL for standalone deployment
+# =============================================================================
+#
+#   postgres:
+#     image: postgres:15-alpine
+#     container_name: btc-astro-db
+#     environment:
+#       POSTGRES_USER: btc
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+#       POSTGRES_DB: ostrofun
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     ports:
+#       - "5432:5432"
+#
+# volumes:
+#   postgres_data:
