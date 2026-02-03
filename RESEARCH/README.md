@@ -76,7 +76,7 @@ This project is **under active development**. The core pipeline is functional an
 
 ## 📊 Current Results
 
-After extensive grid search optimization (6,000+ parameter combinations), the best model achieved:
+After extensive grid search optimization (35,000+ parameter combinations), the best model achieved:
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
