@@ -69,6 +69,12 @@ from RESEARCH.astro_engine import (
     calculate_aspects_for_dates,      # Calculate aspects (angular relationships)
     calculate_phases_for_dates,       # Calculate moon phases, elongations
 )
+from RESEARCH.astro.aspects import (
+    precompute_angles_for_dates,      # Numba-accel precomputation
+    calculate_aspects_from_cache,     # Fast generation from cache
+)
+from RESEARCH.numba_utils import warmup_jit, check_numba_available
+
 from RESEARCH.features import build_full_features, merge_features_with_labels
 from RESEARCH.model_training import (
     split_dataset,                    # Split into train/val/test
@@ -77,6 +83,7 @@ from RESEARCH.model_training import (
     tune_threshold,                   # Find best probability threshold
     predict_with_threshold,           # Predict using custom threshold
     check_cuda_available,             # Check if GPU is available
+    get_feature_importance,           # Calculate feature importance
 )
 from RESEARCH.evaluation import evaluate_model_full, compare_models
 
@@ -101,7 +108,7 @@ MODEL_PARAMS = {
     # Deeper trees can capture more complex patterns but overfit easier
     # depth=6 is standard, we use it to prevent overfitting on small data
     # -------------------------------------------------------------------------
-    'max_depth': 6,
+    'max_depth': 8,
     
     # -------------------------------------------------------------------------
     # learning_rate: Step size shrinkage
@@ -122,7 +129,7 @@ MODEL_PARAMS = {
     # 0.8 = only 80% of training data used for each tree
     # This is "stochastic gradient boosting" - adds randomness
     # -------------------------------------------------------------------------
-    'subsample': 0.8,
+    'subsample': 0.75,
 }
 
 
@@ -142,7 +149,7 @@ GRID_PARAMS = {
     # Smaller window (150) = more sensitive to short-term moves
     # Larger window (250) = only captures major trends
     # -------------------------------------------------------------------------
-    'gauss_windows': [150, 200, 250],
+    'gauss_windows': [75,150, 200, 300],
     
     # -------------------------------------------------------------------------
     # gauss_stds: Standard deviation of Gaussian kernel
@@ -178,7 +185,7 @@ GRID_PARAMS = {
     # orb_mult=0.1 means we multiply standard orbs by 0.1, making them
     # very strict (only near-exact aspects). This reduces false positives.
     # -------------------------------------------------------------------------
-    'orb_mults': [0.1],
+    'orb_mults': [0.05, 0.1, 0.15, 0.25],
 }
 
 
@@ -209,23 +216,22 @@ ABLATION_BODIES = [
     [],
     
     # -------------------------------------------------------------------------
-    # SINGLE BODY EXCLUSIONS: Remove one body at a time
+    # SINGLE BODY EXCLUSIONS: Remove one body at a time (ALL BODIES except Chiron)
     # -------------------------------------------------------------------------
-    ['MeanNode'],   # Top performer in single-body study
-    ['Pluto'],      # Second best
-    ['Saturn'],     # Third
-    ['Venus'],      # Best MCC improvement
-    ['Neptune'],    # Fifth
-    
+    ['Sun'], ['Moon'], ['Mercury'], ['Venus'], ['Mars'],
+    ['Jupiter'], ['Saturn'], ['Uranus'], ['Neptune'],
+    ['Pluto'], ['MeanNode'],
+    # Chiron removed as requested
+
+
     # -------------------------------------------------------------------------
-    # PAIR EXCLUSIONS: Remove two bodies together
-    # Testing if combined exclusion is better than single
+    # PAIR EXCLUSIONS: Remove two bodies together (Top candidates)
     # -------------------------------------------------------------------------
-    ['MeanNode', 'Pluto'],   # Top 2 combined
-    ['MeanNode', 'Saturn'],  # #1 + #3
-    ['MeanNode', 'Venus'],   # #1 + best MCC
-    ['Pluto', 'Saturn'],     # #2 + #3
-    ['Pluto', 'Venus'],      # #2 + best MCC
+    ['MeanNode', 'Pluto'],
+    ['MeanNode', 'Saturn'],
+    ['MeanNode', 'Venus'],
+    ['Pluto', 'Saturn'],
+    ['Pluto', 'Venus'],
 ]
 
 
@@ -245,6 +251,7 @@ def train_and_evaluate(
     exclude_bodies: list = None,
     device: str = 'cpu',
     verbose: bool = False,
+    angles_cache: dict = None, # NEW: Optional cache for speedup
 ):
     """
     Train a model with specific parameters and return evaluation metrics.
@@ -307,12 +314,19 @@ def train_and_evaluate(
     )
     
     # -------------------------------------------------------------------------
-    # STEP 2: Calculate aspects using pre-cached body positions
+    # STEP 2: Calculate aspects
     # -------------------------------------------------------------------------
-    # Aspects = angular relationships between planets (conjunction, square, etc.)
-    df_aspects = calculate_aspects_for_dates(
-        geo_by_date, settings, orb_mult=orb_mult, progress=False
-    )
+    # Use fast Numba cache if available, else slow fallback
+    if angles_cache is not None:
+        df_aspects = calculate_aspects_from_cache(
+            angles_cache, settings, orb_mult=orb_mult, progress=False
+        )
+    else:
+        # Fallback to standard (slower) calculation
+        df_aspects = calculate_aspects_for_dates(
+            geo_by_date, settings, orb_mult=orb_mult, progress=False
+        )
+
     
     # -------------------------------------------------------------------------
     # STEP 3: Calculate moon phases and planet elongations
@@ -418,7 +432,7 @@ def train_and_evaluate(
 # MAIN FUNCTION: RUN FULL GRID SEARCH
 # =============================================================================
 
-def run_full_grid_search(df_market, settings, device='cpu'):
+def run_full_grid_search(df_market, settings, device='cpu', max_iter=None):
     """
     Run comprehensive grid search over all parameter combinations.
     
@@ -432,6 +446,10 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     ---------------
     - GPU (CUDA): 30-60 minutes for 297 combinations
     - CPU: 2-4 hours
+    
+    ARGS:
+    -----
+    max_iter: If set, limits the number of combinations (for testing).
     
     RETURNS:
     --------
@@ -450,6 +468,11 @@ def run_full_grid_search(df_market, settings, device='cpu'):
         GRID_PARAMS['orb_mults'],
         ABLATION_BODIES,
     ))
+    
+    # TEST MODE LIMIT
+    if max_iter:
+        print(f"\n⚠️ TEST MODE ACTIVATED: Limiting search to first {max_iter} combinations!")
+        combos = combos[:max_iter]
     
     print(f"\n📊 Total combinations: {len(combos)}")
     print(f"   Coord modes: {GRID_PARAMS['coord_modes']}")
@@ -492,12 +515,56 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     # -------------------------------------------------------------------------
     cached_bodies = {}
     
+    # Warmup Numba JIT if available
+    if check_numba_available():
+        print("🔥 Warming up Numba JIT...")
+        warmup_jit()
+    
     for coord_mode in GRID_PARAMS['coord_modes']:
         print(f"\n📍 Pre-calculating bodies for {coord_mode}...")
         df_bodies, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
             df_market['date'], settings, coord_mode=coord_mode, progress=True
         )
-        cached_bodies[coord_mode] = (df_bodies, geo_by_date, helio_by_date)
+        
+        # ---------------------------------------------------------------------
+        # BAN CHIRON (User request)
+        # ---------------------------------------------------------------------
+        # Filter dataframe
+        if 'Chiron' in df_bodies['body'].values:
+            df_bodies = df_bodies[df_bodies['body'] != 'Chiron'].copy()
+            
+        # Filter dictionaries
+        for d in geo_by_date:
+            geo_by_date[d] = [b for b in geo_by_date[d] if b.body != 'Chiron']
+        if helio_by_date:
+            for d in helio_by_date:
+                helio_by_date[d] = [b for b in helio_by_date[d] if b.body != 'Chiron']
+        # ---------------------------------------------------------------------
+        
+        # Precompute angles for Numba acceleration
+        # Only Geocentric is used for phases? No, aspects can be helio too.
+        # But our standard aspect calculation usually focuses on GEO.
+        # If coord_mode is 'helio', we might need helio angles?
+        # Current logic: calculate_aspects_for_dates uses geo_by_date if passed.
+        # Check carefully: train_and_evaluate passes 'geo_by_date'.
+        
+        # We will assume we focus on cached 'geo_by_date' for aspects as before.
+        # If user wants helio aspects, we'd need to adapt. 
+        # But existing code passed 'geo_by_date' to calculate_aspects.
+        
+        print(f"📐 Pre-computing angular distances (Numba)...")
+        if coord_mode == 'helio':
+             # Even in helio mode, if the pipeline passed 'geo_by_date', 
+             # we should stick to it unless logical change is requested.
+             # But wait, df_bodies contains 'helio_Mars' etc?
+             # Let's check calculate_bodies_for_dates_multi return.
+             pass
+             
+        # Standardize: We precompute angles for whatever dict is passed to aspect calc.
+        # In current train_and_evaluate, it is 'geo_by_date'.
+        angles_cache = precompute_angles_for_dates(geo_by_date, progress=True)
+        
+        cached_bodies[coord_mode] = (df_bodies, geo_by_date, helio_by_date, angles_cache)
     
     # -------------------------------------------------------------------------
     # Run grid search
@@ -507,6 +574,34 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     print("\n" + "=" * 70)
     print("🚀 STARTING GRID SEARCH")
     print("=" * 70)
+
+    # -------------------------------------------------------------------------
+    # RUN REFERENCE BASELINE (Geo, W=150, S=50, Orb=0.1, All Bodies)
+    # -------------------------------------------------------------------------
+    if 'geo' in cached_bodies:
+        print("\n📉 CALCULATING REFERENCE BASELINE (Standard config)...")
+        # Unpack with 4 elements now
+        df_bodies_base, geo_by_date_base, _, angles_cache_base = cached_bodies['geo']
+        
+        base_result = train_and_evaluate(
+            df_market, df_bodies_base, geo_by_date_base, settings,
+            gauss_window=150,
+            gauss_std=50,
+            orb_mult=0.1,
+            exclude_bodies=None, # ALL BODIES
+            device=device,
+            verbose=False,
+            angles_cache=angles_cache_base, # fast path
+        )
+        
+        if base_result:
+            print(f"   👇 REFERENCE BASELINE RESULT:")
+            print(f"      R_DN={base_result['recall_down']:.2f} R_UP={base_result['recall_up']:.2f} "
+                  f"GAP={base_result['recall_gap']:.2f} F1={base_result['f1_macro']:.2f} "
+                  f"ACC={base_result['balanced_accuracy']:.2f}")
+            print(f"      R_MIN={base_result['recall_min']:.3f} MCC={base_result['mcc']:.3f}")
+            print("-" * 70)
+    # -------------------------------------------------------------------------
     
     print("=" * 70)
     
@@ -526,7 +621,7 @@ def run_full_grid_search(df_market, settings, device='cpu'):
             continue
             
         # Get cached body positions for this coord mode
-        df_bodies, geo_by_date, _ = cached_bodies[coord]
+        df_bodies, geo_by_date, _, angles_cache = cached_bodies[coord]
         
         # Train and evaluate
         result = train_and_evaluate(
@@ -537,6 +632,7 @@ def run_full_grid_search(df_market, settings, device='cpu'):
             exclude_bodies=excl if excl else None,
             device=device,
             verbose=False,  # Quiet mode for grid search
+            angles_cache=angles_cache, # Fast path
         )
         
         if result is None:
@@ -618,12 +714,14 @@ def _save_batch(buffer, path):
 # MAIN ENTRY POINT
 # =============================================================================
 
-def main():
+def main(test_mode=False):
     """
     Main function that orchestrates the entire research workflow.
     """
     print("=" * 70)
     print("🔬 BODY ABLATION RESEARCH - FULL GRID SEARCH")
+    if test_mode:
+        print("🧪 TEST MODE ENABLED: Running only 20 iterations")
     print("=" * 70)
     
     # -------------------------------------------------------------------------
@@ -650,7 +748,8 @@ def main():
     # -------------------------------------------------------------------------
     # Run comprehensive grid search
     # -------------------------------------------------------------------------
-    results_df = run_full_grid_search(df_market, settings, device=device)
+    limit = 20 if test_mode else None
+    results_df = run_full_grid_search(df_market, settings, device=device, max_iter=limit)
     
     # -------------------------------------------------------------------------
     # Sort and display results
@@ -717,6 +816,18 @@ def main():
     )
     
     # -------------------------------------------------------------------------
+    # Feature Importance
+    # -------------------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("⭐ TOP 20 MOST INFLUENTIAL FEATURES")
+    print("=" * 70)
+    
+    # Use the model from the result
+    imp_df = get_feature_importance(result['model'], result['model'].feature_names, top_n=20)
+    print(imp_df.to_string(index=False))
+
+    
+    # -------------------------------------------------------------------------
     # Save results to CSV
     # -------------------------------------------------------------------------
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -737,4 +848,7 @@ def main():
 # =============================================================================
 
 if __name__ == "__main__":
-    results_df, best_result = main()
+    # SET TO TRUE FOR A QUICK CHECK (20 iterations), FALSE FOR FULL RUN
+    TEST_MODE = True
+    
+    results_df, best_result = main(test_mode=TEST_MODE)
