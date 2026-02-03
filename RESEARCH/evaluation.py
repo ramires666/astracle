@@ -219,84 +219,109 @@ def evaluate_model_full(
     # STEP 5: Create visualizations (if requested)
     # -------------------------------------------------------------------------
     if show_plot:
-        # How many plots? 2 if we have dates, 1 otherwise
-        n_plots = 2 if dates is not None else 1
-        fig, axes = plt.subplots(1, n_plots, figsize=figsize)
-        
-        # Handle single plot case (axes is not a list then)
-        if n_plots == 1:
-            axes = [axes]
-        
+        # Determine number of plots and layout
+        if dates is not None and prices is not None:
+            # 3 plots total: 1 CM on top, 2 Time Series below? 
+            # Or just 2 rows: Top=CM, Bottom=Time Series (Predicted & True sharing axis?)
+            # Let's do:
+            # Row 1: Confusion Matrix
+            # Row 2: Predicted Labels (background color)
+            # Row 3: True Labels (background color)
+            
+            fig = plt.figure(figsize=(12, 12))
+            gs = fig.add_gridspec(3, 1, height_ratios=[1, 1, 1])
+            
+            ax_cm = fig.add_subplot(gs[0])
+            ax_pred = fig.add_subplot(gs[1])
+            ax_true = fig.add_subplot(gs[2], sharex=ax_pred)
+            
+            axes_list = [ax_cm, ax_pred, ax_true]
+            
+        elif dates is not None:
+             # Fallback: CM + Scatter
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            ax_cm = axes[0]
+            ax_ts = axes[1]
+            axes_list = [ax_cm, ax_ts]
+            
+        else:
+            # Just CM
+            fig, ax_cm = plt.subplots(1, 1, figsize=(6, 5))
+            axes_list = [ax_cm]
+
         # ---------------------------------------------------------------------
-        # PLOT 1: Confusion Matrix Heatmap
+        # PLOT 1: Confusion Matrix Heatmap (Always on ax_cm)
         # ---------------------------------------------------------------------
-        # Confusion matrix shows:
-        #           Predicted DOWN | Predicted UP
-        # Actual DOWN:    TN       |     FN        (True/False Negative)
-        # Actual UP:      FP       |     TP        (False/True Positive)
-        
         cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-        
-        # Calculate percentages (normalize by row = actual class)
         cm_pct = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
         
-        ax1 = axes[0]
-        
-        # Draw heatmap with absolute numbers
         sns.heatmap(
             cm, annot=True, fmt='d', cmap='Blues',
             xticklabels=label_names, yticklabels=label_names,
-            ax=ax1, cbar=False
+            ax=ax_cm, cbar=False
         )
         
-        # Add percentages below the numbers
         for i in range(2):
             for j in range(2):
-                ax1.text(j + 0.5, i + 0.7, f"({cm_pct[i,j]:.1f}%)",
+                ax_cm.text(j + 0.5, i + 0.7, f"({cm_pct[i,j]:.1f}%)",
                         ha='center', va='center', fontsize=9, color='gray')
         
-        ax1.set_xlabel('Predicted')
-        ax1.set_ylabel('True')
-        ax1.set_title(f'Confusion Matrix\nR_MIN={recall_min:.3f}, MCC={mcc:.3f}')
+        ax_cm.set_xlabel('Predicted')
+        ax_cm.set_ylabel('True')
+        ax_cm.set_title(f'Confusion Matrix\nR_MIN={recall_min:.3f}, MCC={mcc:.3f}')
         
         # ---------------------------------------------------------------------
-        # PLOT 2: Predictions vs True Labels over Time (if dates provided)
+        # PLOT 2 & 3: Time Series
         # ---------------------------------------------------------------------
-        if dates is not None and len(dates) == len(y_true):
-            ax2 = axes[1]
+        if dates is not None and prices is not None:
+            # --- Predicted Labels ---
+            ax_pred.set_title("PREDICTED Labels (Green=UP, Red=DOWN)")
+            ax_pred.plot(dates, prices, color='black', linewidth=1, label='Price')
             
-            # Create DataFrame for plotting
+            p_min, p_max = prices.min(), prices.max()
+            margin = (p_max - p_min) * 0.05
+            fill_min, fill_max = p_min - margin, p_max + margin
+            
+            ax_pred.fill_between(dates, fill_min, fill_max, where=(y_pred==1), 
+                           color='green', alpha=0.2, label='UP')
+            ax_pred.fill_between(dates, fill_min, fill_max, where=(y_pred==0), 
+                           color='red', alpha=0.2, label='DOWN')
+            ax_pred.set_ylabel("Price")
+            ax_pred.grid(True, alpha=0.3)
+            
+            # --- True Labels ---
+            ax_true.set_title("TRUE Labels (Green=UP, Red=DOWN)")
+            ax_true.plot(dates, prices, color='black', linewidth=1, label='Price')
+            
+            ax_true.fill_between(dates, fill_min, fill_max, where=(y_true==1), 
+                           color='green', alpha=0.2, label='UP')
+            ax_true.fill_between(dates, fill_min, fill_max, where=(y_true==0), 
+                           color='red', alpha=0.2, label='DOWN')
+            ax_true.set_ylabel("Price")
+            ax_true.set_xlabel("Date")
+            ax_true.grid(True, alpha=0.3)
+            
+        elif dates is not None:
+            # Fallback Scatter Plot
             df_plot = pd.DataFrame({
                 'date': dates.values if hasattr(dates, 'values') else dates,
                 'true': y_true,
                 'pred': y_pred,
             }).sort_values('date')
             
-            # Plot true and predicted as lines
-            ax2.plot(df_plot['date'], df_plot['true'], 'b-', alpha=0.7, 
-                    label='True', linewidth=1)
-            ax2.plot(df_plot['date'], df_plot['pred'], 'r--', alpha=0.7, 
-                    label='Predicted', linewidth=1)
+            ax_ts.plot(df_plot['date'], df_plot['true'], 'b-', alpha=0.3, label='True')
+            ax_ts.plot(df_plot['date'], df_plot['pred'], 'r--', alpha=0.3, label='Pred')
             
-            # Mark correct and incorrect predictions with different colors
             correct = df_plot['true'] == df_plot['pred']
-            ax2.scatter(df_plot.loc[correct, 'date'], df_plot.loc[correct, 'true'],
-                       c='green', s=10, alpha=0.5, label='Correct', zorder=5)
-            ax2.scatter(df_plot.loc[~correct, 'date'], df_plot.loc[~correct, 'true'],
-                       c='red', s=10, alpha=0.5, label='Wrong', zorder=5)
-            
-            ax2.set_xlabel('Date')
-            ax2.set_ylabel('Label (0=DOWN, 1=UP)')
-            ax2.set_title(f'Predictions vs True Labels\nAccuracy={acc:.3f}')
-            ax2.legend(loc='upper right')
-            ax2.set_yticks([0, 1])
-            ax2.set_yticklabels(label_names)
-            plt.xticks(rotation=45)
-        
-        # Add overall title and display
-        plt.suptitle(title, fontsize=14, fontweight='bold', y=1.02)
+            ax_ts.scatter(df_plot.loc[correct, 'date'], df_plot.loc[correct, 'true'], c='g', s=10)
+            ax_ts.scatter(df_plot.loc[~correct, 'date'], df_plot.loc[~correct, 'true'], c='r', s=10)
+            ax_ts.set_title(f"Accuracy: {acc:.3f}")
+            plt.setp(ax_ts.get_xticklabels(), rotation=45)
+
+        plt.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
         plt.tight_layout()
         plt.show()
+
     
     return metrics
 

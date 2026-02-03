@@ -401,6 +401,14 @@ def train_and_evaluate(
         'y_test': y_test,
         'y_pred': y_pred,
         'test_dates': test_df['date'].reset_index(drop=True),
+        # Retrieve prices from market data by merging on date
+        # test_df does not contain 'close' column, so we must fetch it from the source
+        'test_prices': pd.merge(
+            test_df[['date']], 
+            df_market[['date', 'close']], 
+            on='date', 
+            how='left'
+        )['close'].reset_index(drop=True),
     }
 
 
@@ -622,6 +630,7 @@ def main():
         dates=result['test_dates'],
         title=f"Best Model: {best['exclude_bodies']} ({best['coord_mode']})",
         show_plot=True,
+        prices=result['test_prices'],
     )
     
     # -------------------------------------------------------------------------
@@ -629,6 +638,10 @@ def main():
     # -------------------------------------------------------------------------
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_path = f"RESEARCH/reports/grid_search_{timestamp}.csv"
+    
+    # Calculate directory and create if not exists
+    os.makedirs(os.path.dirname(results_path), exist_ok=True)
+    
     results_df.to_csv(results_path, index=False)
     print(f"\n💾 Results saved to: {results_path}")
     
