@@ -28,6 +28,8 @@ from RESEARCH.astro_engine import (
     calculate_bodies_for_dates_multi,
     calculate_aspects_for_dates,
     calculate_phases_for_dates,
+    calculate_transits_for_dates,
+    get_natal_bodies,
 )
 from RESEARCH.features import build_full_features
 
@@ -102,32 +104,48 @@ class FeatureBuilder:
             for d in dates
         ]
         
-        # Step 1: Calculate body positions for all dates
-        df_bodies, bodies_by_date = calculate_bodies_for_dates(
+        # Step 1: Calculate body positions for all dates (with coord_mode support!)
+        df_bodies, geo_bodies_by_date, helio_bodies_by_date = calculate_bodies_for_dates_multi(
             dates=date_objs,
             settings=self.settings,
+            coord_mode=self.coord_mode,
             progress=progress,
         )
         
-        # Step 2: Calculate aspects between bodies
+        # Step 2: Calculate aspects between bodies (use geo bodies for aspects)
         df_aspects = calculate_aspects_for_dates(
-            bodies_by_date=bodies_by_date,
+            bodies_by_date=geo_bodies_by_date,
             settings=self.settings,
             orb_mult=self.orb_mult,
             progress=progress,
         )
         
-        # Step 3: Calculate Moon phases and elongations
+        # Step 3: Calculate Moon phases and elongations (use geo for Moon)
         df_phases = calculate_phases_for_dates(
-            bodies_by_date=bodies_by_date,
+            bodies_by_date=geo_bodies_by_date,
             progress=progress,
         )
         
-        # Step 4: Build full feature matrix
+        # Step 4: Calculate natal chart and transit aspects (CRITICAL for 60% accuracy!)
+        natal_dt_str = f"{self.birth_date}T12:00:00"
+        natal_bodies = get_natal_bodies(natal_dt_str, self.settings)
+        
+        df_transits = calculate_transits_for_dates(
+            bodies_by_date=geo_bodies_by_date,
+            natal_bodies=natal_bodies,
+            settings=self.settings,
+            orb_mult=self.orb_mult,
+            progress=progress,
+        )
+        
+        # Step 5: Build full feature matrix (with transit aspects!)
         df_features = build_full_features(
             df_bodies=df_bodies,
             df_aspects=df_aspects,
+            df_transits=df_transits,
             df_phases=df_phases,
+            include_pair_aspects=True,
+            include_transit_aspects=True,  # KEY: match training!
             exclude_bodies=self.exclude_bodies,
         )
         
