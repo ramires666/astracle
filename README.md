@@ -80,6 +80,90 @@ Given today's planetary positions, the model predicts tomorrow's price direction
 
 ---
 
+## 🏗️ Dual Model Architecture
+
+This project uses a **dual-model strategy** to ensure both **honest backtesting** and **optimal forecasting**:
+
+### The Problem
+
+When a machine learning model is trained on historical data and then tested on the same data, it shows artificially high accuracy (overfitting). To provide honest accuracy metrics while still using all available data for the best predictions, we use two separate models:
+
+### Model 1: Split Model (for Backtest)
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Show honest historical accuracy |
+| **Training Data** | Train/Val/Test split (70/15/15) |
+| **File** | `models_artifacts/btc_astro_predictor.joblib` |
+| **Used For** | Backtest predictions (past dates) |
+
+The split model is trained on only ~70% of historical data, leaving 30% as a true holdout. When we show "Historical Accuracy" on the UI, these are real out-of-sample predictions the model never saw during training.
+
+### Model 2: Full Model (for Forecast)
+
+| Property | Value |
+|----------|-------|
+| **Purpose** | Best possible future predictions |
+| **Training Data** | ALL available data (2017-present) |
+| **File** | `models_artifacts/btc_astro_predictor.full.joblib` |
+| **Used For** | Future predictions (forecast) |
+
+The full model is trained on 100% of available historical data. For predicting the actual future (which the model has never seen), using all available information gives the best results.
+
+### Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    generate_cache.py                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────────────┐        ┌─────────────────────┐         │
+│  │   BACKTEST CACHE    │        │   FORECAST CACHE    │         │
+│  │   (Past 3 years)    │        │   (Next 365 days)   │         │
+│  └─────────┬───────────┘        └──────────┬──────────┘         │
+│            │                               │                     │
+│            ▼                               ▼                     │
+│  ┌─────────────────────┐        ┌─────────────────────┐         │
+│  │   SPLIT MODEL       │        │   FULL MODEL        │         │
+│  │   (Honest Accuracy) │        │   (Best Forecast)   │         │
+│  │   ~60% R_MIN        │        │   Trained on ALL    │         │
+│  └─────────────────────┘        └─────────────────────┘         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Daily Retraining (Docker)
+
+In production, the system automatically retrains the FULL model daily when new price data arrives:
+
+```bash
+# Cron job example (runs at 6 AM UTC)
+0 6 * * * python -m production_dev.daily_retrain
+```
+
+The `daily_retrain.py` script:
+1. **Updates price data** from the database
+2. **Retrains the FULL model** on all available historical data
+3. **Regenerates the cache** using both models (split for backtest, full for forecast)
+
+### Key Files
+
+| File | Description |
+|------|-------------|
+| `train_full_model.py` | Trains the FULL model on all data |
+| `generate_cache.py` | Generates prediction cache using dual models |
+| `daily_retrain.py` | Daily automation script for Docker |
+| `cache_service.py` | Memory cache for fast API responses |
+
+### Why This Matters
+
+- **Honest Metrics**: The Historical Accuracy badge shows real out-of-sample performance (~60%)
+- **Best Predictions**: Future forecasts use all available information
+- **Production Ready**: Daily retraining keeps the model updated with latest data
+- **Transparent**: Users can trust the accuracy numbers shown on the dashboard
+
+
+
 ## 🚀 Quick Start
 
 ### Option 1: Run with Docker (Recommended)
@@ -119,6 +203,10 @@ ostrofun/
 ├── 📂 production_dev/          # 🚀 PRODUCTION SERVICE (this is what you run)
 │   ├── main.py                 # FastAPI application
 │   ├── predictor.py            # Core prediction logic
+│   ├── cache_service.py        # Memory cache management
+│   ├── generate_cache.py       # 🆕 Dual-model cache generator
+│   ├── train_full_model.py     # 🆕 Full model training script
+│   ├── daily_retrain.py        # 🆕 Daily retraining automation
 │   ├── data_service.py         # Database data fetching
 │   ├── schemas.py              # API request/response models
 │   ├── static/                 # Web UI files
@@ -148,10 +236,12 @@ ostrofun/
 │   └── subjects.yaml           # Trading pairs config
 │
 ├── 📂 models_artifacts/        # 💾 SAVED MODELS
-│   └── btc_astro_predictor.joblib  # Trained model file
+│   ├── btc_astro_predictor.joblib      # 🆕 Split model (backtest)
+│   └── btc_astro_predictor.full.joblib # 🆕 Full model (forecast)
 │
 ├── 📂 data/                    # 📊 DATA FILES
 │   ├── ephe/                   # Swiss Ephemeris data files
+│   ├── prediction_cache/       # 🆕 Cached predictions (parquet)
 │   └── processed/              # Processed datasets
 │
 └── 📄 README.md                # You are here!

@@ -216,8 +216,8 @@ def merge_with_actual_prices(
         lambda x: "UP" if x > 0 else "DOWN" if x < 0 else "FLAT"
     )
     
-    # Calculate correctness
-    df["correct"] = (df["direction"] == df["actual_direction"])
+    # Calculate correctness (use object dtype to allow None)
+    df["correct"] = (df["direction"] == df["actual_direction"]).astype(object)
     
     # First row has no previous day, so mark as None
     df.loc[0, "correct"] = None

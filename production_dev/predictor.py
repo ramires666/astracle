@@ -146,10 +146,17 @@ class BtcAstroPredictor:
         # Generate features for target date
         features = self._calculate_features(target_date)
         
-        # Predict
+        # Predict - support both XGBBaseline wrapper and plain XGBClassifier
         X = np.array([features])
-        X_scaled = self.model.scaler.transform(X)
-        proba = self.model.model.predict_proba(X_scaled)[0]
+        
+        # Check if model has scaler (XGBBaseline wrapper) or is plain XGBClassifier
+        if hasattr(self.model, 'scaler') and hasattr(self.model, 'model'):
+            # Old format: XGBBaseline wrapper
+            X_scaled = self.model.scaler.transform(X)
+            proba = self.model.model.predict_proba(X_scaled)[0]
+        else:
+            # New format: plain XGBClassifier (no scaler needed)
+            proba = self.model.predict_proba(X)[0]
         
         # Apply optimal threshold (default 0.5, can be tuned)
         threshold = 0.52  # Slightly adjusted based on training

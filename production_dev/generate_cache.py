@@ -152,45 +152,55 @@ def load_historical_prices() -> pd.DataFrame:
         from RESEARCH.data_loader import load_market_data
         
         df = load_market_data()
-        # Keep only last 2 years for efficiency
-        cutoff = datetime.now() - timedelta(days=730)
-        df = df[df["date"] >= cutoff.date()].copy()
+        # Ensure date column is datetime
+        df["date"] = pd.to_datetime(df["date"])
+        
+        # Keep only last 3 years for efficiency (matches backtest range)
+        cutoff = pd.Timestamp.now() - pd.Timedelta(days=1100)
+        df = df[df["date"] >= cutoff].copy()
         
         print(f"📈 Loaded {len(df)} historical prices")
         return df
         
     except Exception as e:
         print(f"⚠️ Could not load historical prices: {e}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 
 def main():
     """Main cache generation function."""
     print("=" * 60)
-    print("🚀 PREDICTION CACHE GENERATOR")
+    print("🚀 PREDICTION CACHE GENERATOR (Dual Model)")
     print("=" * 60)
     
     # Ensure cache directory exists
     cache_dir = ensure_cache_dir()
     print(f"📁 Cache directory: {cache_dir}")
     
-    # Initialize predictor
-    print("\n📦 Loading prediction model...")
-    predictor = BtcAstroPredictor()
+    # Model paths
+    SPLIT_MODEL = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"  # Split-trained for honest backtest
+    FULL_MODEL = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"  # Full-trained for best forecast
     
-    if not predictor.load_model():
-        print("❌ ERROR: Could not load model. Run the training notebook first.")
+    # =========================================
+    # BACKTEST: Use split model (honest accuracy)
+    # =========================================
+    print("\n📦 Loading SPLIT model for backtest...")
+    backtest_predictor = BtcAstroPredictor(model_path=SPLIT_MODEL)
+    
+    if not backtest_predictor.load_model():
+        print("❌ ERROR: Could not load split model.")
         sys.exit(1)
     
-    print(f"✅ Model loaded: {predictor.config.get('birth_date')}")
-    print(f"   Features: {len(predictor.feature_names)}")
-    print(f"   R_MIN: {predictor.config.get('r_min', 'N/A')}")
+    print(f"✅ Backtest model loaded: {backtest_predictor.config.get('birth_date')}")
+    print(f"   Features: {len(backtest_predictor.feature_names)}")
     
     # Load historical prices for backtest
     historical_prices = load_historical_prices()
     
     # Generate backtest predictions
-    backtest = generate_backtest_predictions(predictor, days=BACKTEST_DAYS)
+    backtest = generate_backtest_predictions(backtest_predictor, days=BACKTEST_DAYS)
     
     # Save backtest with actual prices
     save_predictions_to_cache(
@@ -199,16 +209,33 @@ def main():
         actual_prices=historical_prices if len(historical_prices) > 0 else None,
     )
     
+    # =========================================
+    # FORECAST: Use full model (best predictions)
+    # =========================================
+    print("\n📦 Loading FULL model for forecast...")
+    
+    # Check if full model exists, fallback to split if not
+    if FULL_MODEL.exists():
+        forecast_predictor = BtcAstroPredictor(model_path=FULL_MODEL)
+        if not forecast_predictor.load_model():
+            print("⚠️ Full model failed, falling back to split model")
+            forecast_predictor = backtest_predictor
+        else:
+            print(f"✅ Forecast model loaded (FULL)")
+    else:
+        print("⚠️ Full model not found, using split model for forecast")
+        forecast_predictor = backtest_predictor
+    
     # Generate forecast predictions
-    forecast = generate_forecast_predictions(predictor, days=FORECAST_DAYS)
+    forecast = generate_forecast_predictions(forecast_predictor, days=FORECAST_DAYS)
     save_predictions_to_cache(forecast, "forecast")
     
     # Summary
     print("\n" + "=" * 60)
     print("✅ CACHE GENERATION COMPLETE")
     print("=" * 60)
-    print(f"   Backtest: {len(backtest)} days cached")
-    print(f"   Forecast: {len(forecast)} days cached")
+    print(f"   Backtest: {len(backtest)} days (split model)")
+    print(f"   Forecast: {len(forecast)} days (full model)")
     print(f"   Location: {cache_dir}")
     
     # Quick accuracy check

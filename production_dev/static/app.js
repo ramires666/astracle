@@ -591,10 +591,12 @@ function initializeChart() {
                         label: function (context) {
                             const value = context.parsed.y;
                             const label = context.dataset.label;
+                            const pointDate = new Date(context.parsed.x);
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
 
-                            // Only show detail info for Forecast, not Actual Price
+                            // For Forecast dataset - show prediction details
                             if (label === 'Forecast') {
-                                // Find matching prediction by index
                                 const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
                                 const pred = forecastSlice[context.dataIndex];
                                 if (pred) {
@@ -607,8 +609,20 @@ function initializeChart() {
                                 return `Forecast: $${value.toLocaleString()}`;
                             }
 
-                            // Historical price - just show price
+                            // For Actual Price - ONLY show for past dates, hide for future
+                            if (label === 'Actual Price') {
+                                if (pointDate > today) {
+                                    // Future date - don't show actual price tooltip
+                                    return null;
+                                }
+                                return `${label}: $${value.toLocaleString()}`;
+                            }
+
                             return `${label}: $${value.toLocaleString()}`;
+                        },
+                        // Filter out null labels
+                        filter: function (tooltipItem) {
+                            return tooltipItem.formattedValue !== null;
                         },
                     },
                 },
