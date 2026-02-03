@@ -270,7 +270,7 @@ function updateAccuracyDisplay(stats) {
 
 /**
  * Generate forecast using cached predictions.
- * Uses deterministic price simulation based on confidence.
+ * Uses pre-calculated simulated prices from cache.
  */
 async function generateForecast(days) {
     if (state.isLoading) return;
@@ -280,38 +280,14 @@ async function generateForecast(days) {
     elements.predictBtn.disabled = true;
 
     try {
-        // Use cached forecast if available
+        // Update forecast days
+        state.forecastDays = days;
+        elements.daysValue.textContent = `${days} days`;
+
+        // Use cached forecast (already has simulated prices from generate_cache.py)
         if (state.cachedForecast && state.cachedForecast.length > 0) {
-            // Slice to requested number of days
-            const forecastSlice = state.cachedForecast.slice(0, days);
-
-            // Recalculate simulated prices starting from last known price
-            const lastPrice = state.historicalPrices.length > 0
-                ? state.historicalPrices[state.historicalPrices.length - 1].price
-                : 78000;
-
-            // Deterministic price simulation based on confidence
-            let price = lastPrice;
-            state.predictions = forecastSlice.map(pred => {
-                // Confidence determines move strength (50% = no move, 60% = ~2% move)
-                const confidence = pred.confidence || 0.5;
-                const confidenceStrength = Math.max(0, (confidence - 0.5) * 2);  // 0 to 1
-
-                // Max daily move ~2%, scaled by confidence  
-                const movePercent = 0.02 * confidenceStrength;
-                const direction = pred.direction === 'UP' ? 1 : -1;
-
-                // Apply move (UP = positive, DOWN = negative)
-                price = price * (1 + direction * movePercent);
-
-                return {
-                    date: pred.date,
-                    direction: pred.direction,
-                    confidence: pred.confidence,
-                    simulated_price: Math.round(price * 100) / 100,
-                };
-            });
-
+            // Just slice to requested number of days
+            state.predictions = state.cachedForecast.slice(0, days);
             console.log(`🔮 Using cached forecast: ${state.predictions.length} days`);
         } else {
             // Fallback to API if no cache
@@ -336,8 +312,12 @@ async function generateForecast(days) {
             price_change_percent: priceChange,
         };
 
-        // Update all UI components
-        updateChart();
+        // Rebuild chart with new forecast range
+        if (state.chart) {
+            state.chart.destroy();
+        }
+        initializeChart();
+
         updateSummary(summary);
         updateTable(state.predictions);
 
@@ -612,18 +592,22 @@ function initializeChart() {
                             const value = context.parsed.y;
                             const label = context.dataset.label;
 
-                            if (context.datasetIndex === 1) {
-                                // Prediction dataset
-                                const pred = state.predictions[context.dataIndex];
+                            // Only show detail info for Forecast, not Actual Price
+                            if (label === 'Forecast') {
+                                // Find matching prediction by index
+                                const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
+                                const pred = forecastSlice[context.dataIndex];
                                 if (pred) {
                                     return [
-                                        `${label}: $${value.toLocaleString()}`,
+                                        `Forecast: $${value.toLocaleString()}`,
                                         `Direction: ${pred.direction}`,
                                         `Confidence: ${(pred.confidence * 100).toFixed(1)}%`,
                                     ];
                                 }
+                                return `Forecast: $${value.toLocaleString()}`;
                             }
 
+                            // Historical price - just show price
                             return `${label}: $${value.toLocaleString()}`;
                         },
                     },

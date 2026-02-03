@@ -235,21 +235,24 @@ class BtcAstroPredictor:
             # This maps [0.5, 1.0] to [0, 1]
             confidence_strength = max(0, (confidence - 0.5) * 2)
             
-            # Direction: +1 for UP, -1 for DOWN
-            direction = pred["direction_code"]
+            # Direction: convert 0/1 to -1/+1 for price movement
+            # direction_code: 0=DOWN, 1=UP
+            # We need: DOWN=-1, UP=+1
+            direction = 1 if pred["direction_code"] == 1 else -1
             
-            # Drift scaled by confidence strength
-            # Max drift ~0.5% when confidence=100%, 0% when confidence=50%
-            max_drift = 0.005  # 0.5% max daily directional move
-            drift = direction * max_drift * confidence_strength
+            # DETERMINISTIC price movement with micro-jitter for natural look
+            # Move amount: 0.3% base + up to 1.2% extra based on confidence
+            # At 50% confidence: 0.3% move (minimum)
+            # At 100% confidence: 1.5% move (maximum)
+            move_percent = 0.003 + 0.012 * confidence_strength
             
-            # Random component - smaller when confidence is high
-            # High confidence = more predictable movement
-            noise_factor = 1.0 - (confidence_strength * 0.7)  # Reduce noise up to 70%
-            random_return = np.random.normal(drift, volatility * noise_factor)
+            # Apply direction with small jitter for natural look
+            # Jitter is ±0.3% random noise
+            jitter = np.random.uniform(-0.003, 0.003)
+            price_change = direction * move_percent + jitter
             
             # Calculate new price
-            new_price = prices[-1] * (1 + random_return)
+            new_price = prices[-1] * (1 + price_change)
             new_price = max(new_price, 100)  # Floor at $100 for sanity
             prices.append(new_price)
             
