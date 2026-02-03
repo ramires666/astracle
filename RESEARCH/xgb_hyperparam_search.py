@@ -469,7 +469,12 @@ print("✓ Кэш готов!\n")
 results = []
 best_so_far = {"R_MIN": 0, "combo": None}
 
+# Checkpoint settings
+CHECKPOINT_EVERY = 100
+checkpoint_path = PROJECT_ROOT / "data" / "market" / "reports" / f"xgb_hyperparam_{ACTIVE_CONFIG}_checkpoint.parquet"
+
 print(f"🔢 Всего комбинаций: {len(param_combos)}")
+print(f"💾 Checkpoint каждые {CHECKPOINT_EVERY} итераций → {checkpoint_path}")
 print("=" * 80)
 
 for i, params in enumerate(param_combos):
@@ -529,6 +534,18 @@ for i, params in enumerate(param_combos):
             "n_estimators": n_est, "max_depth": max_d,
             "learning_rate": lr, "error": str(e)
         })
+    
+    # 💾 Checkpoint every N iterations
+    if (i + 1) % CHECKPOINT_EVERY == 0:
+        checkpoint_df = pd.DataFrame(results)
+        checkpoint_df.to_parquet(checkpoint_path, index=False)
+        print(f"\n💾 CHECKPOINT saved: {len(results)} results → {checkpoint_path.name}\n")
+
+# Final save
+if results:
+    final_df = pd.DataFrame(results)
+    final_df.to_parquet(checkpoint_path, index=False)
+    print(f"\n💾 FINAL saved: {len(results)} results → {checkpoint_path.name}")
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
