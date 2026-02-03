@@ -778,6 +778,25 @@ X_val, y_val = prepare_xy(val_df, feature_cols)
 X_test, y_test = prepare_xy(test_df, feature_cols)
 
 # %%
+# 🔍 ДИАГНОСТИКА: проверяем что используется
+print("\n" + "=" * 80)
+print("🔍 DIAGNOSTICS")
+print("=" * 80)
+print(f"   Features count: {len(feature_cols)}")
+print(f"   Sample features: {feature_cols[:10]}...")
+
+# Проверяем есть ли фазы
+phase_features = [c for c in feature_cols if 'phase' in c.lower() or 'elongation' in c.lower() or 'lunar' in c.lower()]
+print(f"   Phase/elongation features: {len(phase_features)}")
+if phase_features:
+    print(f"   → {phase_features[:5]}...")
+
+print(f"\n   BEST_PARAMS being used: {BEST_PARAMS}")
+print(f"   Config: {config['name']}")
+print(f"   exclude_bodies: {config['exclude_bodies']}")
+print("=" * 80)
+
+# %%
 # Обучаем модель с лучшими параметрами
 print("\n🌳 Training XGBoost with best hyperparameters...")
 model = train_xgb_model(
@@ -829,10 +848,15 @@ recall_up = cm[1,1] / (cm[1,0] + cm[1,1]) if (cm[1,0] + cm[1,1]) > 0 else 0
 recall_min = min(recall_down, recall_up)
 recall_gap = abs(recall_up - recall_down)
 
+# MCC
+from sklearn.metrics import matthews_corrcoef
+mcc = matthews_corrcoef(y_test, y_pred)
+
 print(f"\n📈 Recall DOWN: {recall_down:.3f}")
 print(f"📈 Recall UP:   {recall_up:.3f}")
 print(f"📈 R_MIN:       {recall_min:.3f}")
 print(f"📈 Gap:         {recall_gap:.3f}")
+print(f"📈 MCC:         {mcc:.3f}")
 
 # %%
 # Plot Confusion Matrix
@@ -895,6 +919,55 @@ plt.tight_layout()
 plt.show()
 
 # %%
+# 📊 Дополнительный график: Predicted vs True (с цветной заливкой)
+print("\n📊 Predicted vs True Labels (shaded)...")
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+
+dates = test_df_plot["date"].values
+close = test_df_plot["close"].values
+
+# Helper function for continuous shading
+def shade_labels(ax, dates, labels, close, title):
+    ax.plot(dates, close, color="black", linewidth=1.2, label="Price")
+    
+    up_added = False
+    down_added = False
+    
+    for i in range(len(dates) - 1):
+        label = labels[i]
+        if label == 1:
+            ax.axvspan(dates[i], dates[i+1], color="green", alpha=0.2, 
+                      label="UP" if not up_added else None)
+            up_added = True
+        else:
+            ax.axvspan(dates[i], dates[i+1], color="red", alpha=0.2,
+                      label="DOWN" if not down_added else None)
+            down_added = True
+    
+    ax.set_ylabel("Price")
+    ax.set_title(title)
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+
+# Plot 1: Predictions
+shade_labels(axes[0], dates, y_pred, close, "PREDICTED Labels")
+
+# Plot 2: True labels  
+shade_labels(axes[1], dates, y_test, close, "TRUE Labels")
+axes[1].set_xlabel("Date")
+
+plt.tight_layout()
+plt.show()
+
+# Статистика совпадений
+accuracy = (y_pred == y_test).mean()
+print(f"\n📈 Test Accuracy: {accuracy:.1%}")
+print(f"   Correct: {(y_pred == y_test).sum()} / {len(y_test)}")
+print(f"   R_MIN: {recall_min:.3f}")
+print(f"   MCC:   {mcc:.3f}")
+
+# %%
 # Feature Importance
 print("\n📊 Feature Importance (Top 20)...")
 from RESEARCH.model_training import get_feature_importance
@@ -925,6 +998,7 @@ artifact = {
         "recall_down": recall_down,
         "recall_min": recall_min,
         "recall_gap": recall_gap,
+        "mcc": mcc,
     }
 }
 
@@ -943,6 +1017,7 @@ print(f"""
    R_UP:       {recall_up:.3f}
    R_DOWN:     {recall_down:.3f}
    Gap:        {recall_gap:.3f}
+   MCC:        {mcc:.3f}
    Threshold:  {best_threshold:.3f}
    
 🌳 Best XGBoost Params:
