@@ -210,6 +210,36 @@ async def get_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/historical")
+async def get_historical_data(days: int = 30):
+    """
+    Get historical BTC price data from project database.
+    
+    Uses the same data loading functions that were used for
+    initial data collection (RESEARCH.data_loader).
+    
+    Args:
+        days: Number of historical days to load (1-365, default: 30)
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="Days must be between 1 and 365")
+    
+    try:
+        from production_dev.data_service import load_historical_prices, get_data_summary
+        
+        prices = load_historical_prices(days=days)
+        summary = get_data_summary()
+        
+        return JSONResponse(content={
+            "prices": prices,
+            "summary": summary,
+            "count": len(prices),
+        })
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data loading error: {str(e)}")
+
+
 # =============================================================================
 # STARTUP / SHUTDOWN EVENTS
 # =============================================================================
