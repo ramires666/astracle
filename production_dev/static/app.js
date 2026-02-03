@@ -27,6 +27,9 @@ let state = {
     chart: null,
     predictions: [],
     historicalPrices: [],
+    cachedBacktest: [],      // Past predictions with accuracy
+    cachedForecast: [],      // Future cached predictions
+    accuracyStats: null,     // Backtest accuracy statistics
     isLoading: false,
     modelInfo: null,
 };
@@ -79,14 +82,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up event listeners
     setupEventListeners();
 
-    // Load historical data and model info in parallel
+    // Load data in parallel
     await Promise.all([
         fetchHistoricalPrices(),
         checkModelHealth(),
+        fetchCachedPredictions(),
     ]);
 
-    // Initial chart with just historical data
+    // Initial chart with historical + cached data
     initializeChart();
+
+    // Show accuracy stats if available
+    if (state.accuracyStats) {
+        updateAccuracyDisplay(state.accuracyStats);
+    }
 
     console.log('✅ Initialization complete');
 });
@@ -166,6 +175,64 @@ async function fetchHistoricalPrices() {
         console.error('Failed to fetch historical prices:', error);
         // Use fallback data if API fails
         state.historicalPrices = generateFallbackHistoricalData();
+    }
+}
+
+/**
+ * Fetch cached predictions (backtest + forecast) from API.
+ * These are pre-calculated and stored in memory on the server.
+ */
+async function fetchCachedPredictions() {
+    try {
+        const response = await fetch(`${CONFIG.API_BASE}/api/predictions/full`);
+
+        if (!response.ok) {
+            console.warn('Cached predictions not available:', response.status);
+            return;
+        }
+
+        const data = await response.json();
+
+        // Store backtest (past predictions with accuracy)
+        if (data.backtest && data.backtest.length > 0) {
+            state.cachedBacktest = data.backtest;
+            console.log(`📊 Loaded ${data.backtest.length} backtest predictions`);
+        }
+
+        // Store forecast (future predictions)
+        if (data.forecast && data.forecast.length > 0) {
+            state.cachedForecast = data.forecast;
+            console.log(`🔮 Loaded ${data.forecast.length} forecast predictions`);
+        }
+
+        // Store accuracy stats
+        if (data.accuracy) {
+            state.accuracyStats = data.accuracy;
+            console.log(`📈 Backtest accuracy: ${(data.accuracy.accuracy * 100).toFixed(1)}%`);
+        }
+
+    } catch (error) {
+        console.warn('Could not fetch cached predictions:', error);
+    }
+}
+
+/**
+ * Update accuracy display in the UI.
+ */
+function updateAccuracyDisplay(stats) {
+    // Update accuracy badge if it exists
+    if (elements.accuracyBadge) {
+        const accuracyPct = (stats.accuracy * 100).toFixed(1);
+        elements.accuracyBadge.textContent = `${accuracyPct}% Historical Accuracy`;
+
+        // Color based on accuracy
+        if (stats.accuracy >= 0.55) {
+            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+        } else if (stats.accuracy >= 0.50) {
+            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #eab308, #ca8a04)';
+        } else {
+            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+        }
     }
 }
 
@@ -284,12 +351,52 @@ function initializeChart() {
         y: hp.price,
     }));
 
+    // Prepare backtest data (past predictions with actual prices)
+    const backtestData = state.cachedBacktest.map(bt => ({
+        x: bt.date,
+        y: bt.actual_price || 0,
+    })).filter(d => d.y > 0);
+
+    // Colors for backtest points based on accuracy
+    const backtestPointColors = state.cachedBacktest.map(bt => {
+        if (bt.correct === null || bt.correct === undefined) return 'rgba(150, 150, 150, 0.5)';
+        return bt.correct ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)';  // Green or Red
+    });
+
+    const backtestBorderColors = state.cachedBacktest.map(bt => {
+        if (bt.correct === null || bt.correct === undefined) return 'rgba(150, 150, 150, 0.8)';
+        return bt.correct ? '#22c55e' : '#ef4444';  // Green or Red
+    });
+
+    // Prepare forecast data from cache
+    const cachedForecastData = state.cachedForecast.map(f => ({
+        x: f.date,
+        y: f.simulated_price || 0,
+    }));
+
     state.chart = new Chart(ctx, {
         type: 'line',
         data: {
             datasets: [
+                // Backtest: Past predictions with accuracy colors
                 {
-                    label: 'Historical Price',
+                    label: 'Backtest (Past Predictions)',
+                    data: backtestData,
+                    borderColor: 'rgba(150, 150, 180, 0.4)',
+                    backgroundColor: 'rgba(100, 100, 150, 0.05)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 8,
+                    pointBackgroundColor: backtestPointColors,
+                    pointBorderColor: backtestBorderColors,
+                    pointBorderWidth: 2,
+                    borderWidth: 1,
+                    order: 2,  // Draw behind
+                },
+                // Historical actual prices
+                {
+                    label: 'Actual Price',
                     data: historicalData,
                     borderColor: 'rgba(255, 255, 255, 0.6)',
                     backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -298,10 +405,12 @@ function initializeChart() {
                     pointRadius: 0,
                     pointHoverRadius: 6,
                     borderWidth: 2,
+                    order: 1,
                 },
+                // Predicted future prices
                 {
-                    label: 'Predicted Price',
-                    data: [],  // Will be filled on forecast
+                    label: 'Forecast',
+                    data: cachedForecastData,  // Start with cached, can be overwritten
                     borderColor: '#f7b731',
                     backgroundColor: 'rgba(247, 183, 49, 0.1)',
                     fill: true,
@@ -309,12 +418,13 @@ function initializeChart() {
                     pointRadius: 3,
                     pointHoverRadius: 8,
                     borderWidth: 2.5,
+                    order: 0,  // Draw on top
                     segment: {
                         borderColor: ctx => {
                             // Color based on prediction direction
-                            const pred = state.predictions[ctx.p0DataIndex];
-                            if (pred) {
-                                return pred.direction === 'UP' ? '#00d4aa' : '#ff6b6b';
+                            const forecast = state.cachedForecast[ctx.p0DataIndex] || state.predictions[ctx.p0DataIndex];
+                            if (forecast) {
+                                return forecast.direction === 'UP' ? '#00d4aa' : '#ff6b6b';
                             }
                             return '#f7b731';
                         },

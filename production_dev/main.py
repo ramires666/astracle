@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+import numpy as np
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -166,16 +167,20 @@ async def get_predictions(
         down_count = len(predictions) - up_count
         avg_confidence = sum(p["confidence"] for p in predictions) / len(predictions)
         
-        # Convert to response model
+        # Convert to response model (ensure native Python types for Pydantic)
         prediction_items = [
             PredictionItem(
                 date=p["date"],
                 direction=p["direction"],
-                confidence=p["confidence"],
-                simulated_price=p.get("simulated_price", 0.0),
+                confidence=float(p["confidence"]),  # Convert from numpy
+                simulated_price=float(p.get("simulated_price", 0.0)),  # Convert from numpy
             )
             for p in predictions
         ]
+        
+        # Ensure summary values are native Python types
+        start_price = float(predictions[0].get("simulated_price", 0.0)) if predictions else 0.0
+        end_price = float(predictions[-1].get("simulated_price", 0.0)) if predictions else 0.0
         
         return ForecastResponse(
             predictions=prediction_items,
@@ -184,9 +189,9 @@ async def get_predictions(
                 "up_predictions": up_count,
                 "down_predictions": down_count,
                 "up_ratio": round(up_count / len(predictions), 3),
-                "average_confidence": round(avg_confidence, 3),
-                "start_price": predictions[0].get("simulated_price", 0.0) if predictions else 0.0,
-                "end_price": predictions[-1].get("simulated_price", 0.0) if predictions else 0.0,
+                "average_confidence": round(float(avg_confidence), 3),
+                "start_price": start_price,
+                "end_price": end_price,
             },
             model_info=predictor.get_model_info(),
             generated_at=datetime.utcnow().isoformat(),
@@ -238,6 +243,42 @@ async def get_historical_data(days: int = 30):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Data loading error: {str(e)}")
+
+
+@app.get("/api/predictions/full")
+async def get_full_cached_predictions():
+    """
+    Get all cached predictions (backtest + forecast).
+    
+    Returns backtest predictions with actual price accuracy,
+    and future forecast predictions with simulated prices.
+    
+    This endpoint uses pre-calculated cached data for fast loading.
+    Run `python -m production_dev.generate_cache` to update the cache.
+    """
+    try:
+        from production_dev.cache_service import get_full_predictions
+        
+        data = get_full_predictions()
+        
+        # Convert numpy types to native Python for JSON serialization
+        def convert_types(obj):
+            if isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, dict):
+                return {k: convert_types(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_types(item) for item in obj]
+            return obj
+        
+        return JSONResponse(content=convert_types(data))
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cache loading error: {str(e)}")
 
 
 # =============================================================================
