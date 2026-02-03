@@ -30,4 +30,4 @@ data/postgres/
 old-project/
 *.parquet
 data/market/
-models_artifacts/
+

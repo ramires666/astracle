@@ -1,0 +1,34 @@
+{
+  "step": "train",
+  "params": {
+    "two_stage": true,
+    "tune_enabled": true,
+    "tune_n_iter": 25,
+    "tune_cv_splits": 5,
+    "tune_scoring": "f1_macro",
+    "xgb_params": {},
+    "device": "cuda",
+    "n_classes": 3,
+    "threshold_tuning": true
+  },
+  "inputs": [
+    {
+      "path": "C:\\_PYTH\\projects\\PythonProject\\ostrofun\\data\\market\\processed\\btc_split_oracle_gauss_h1_pmraw_s1p0_thr100p000500_tmfixed__om1p20_geo_train.parquet",
+      "size": 1798673,
+      "mtime": 1769971416.5918958
+    },
+    {
+      "path": "C:\\_PYTH\\projects\\PythonProject\\ostrofun\\data\\market\\processed\\btc_split_oracle_gauss_h1_pmraw_s1p0_thr100p000500_tmfixed__om1p20_geo_val.parquet",
+      "size": 862169,
+      "mtime": 1769971416.670794
+    },
+    {
+      "path": "C:\\_PYTH\\projects\\PythonProject\\ostrofun\\data\\market\\processed\\btc_split_oracle_gauss_h1_pmraw_s1p0_thr100p000500_tmfixed__om1p20_geo_test.parquet",
+      "size": 882171,
+      "mtime": 1769971416.7197998
+    }
+  ],
+  "version": 1,
+  "key": "dbab10d9c52da67c686cecd63340679e3575fa04",
+  "created_at": "2026-02-01T18:46:05.248659+00:00"
+}

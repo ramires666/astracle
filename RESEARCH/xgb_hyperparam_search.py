@@ -319,19 +319,22 @@ plot_predictions(test_df_plot, y_pred, y_true=y_test, price_mode="log")
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
-# 🔬 PARAMETER GRID SEARCH — ПЕРЕБОР ВСЕХ ПАРАМЕТРОВ
+# 🌳 XGBOOST HYPERPARAMETER SEARCH
 # ══════════════════════════════════════════════════════════════════════════════════
 #
-# Этот ноутбук позволяет ЛЕГКО менять параметры поиска:
-# - Орбис множители (насколько точные аспекты)
-# - Окна Гаусса (масштаб тренда)
-# - Std Гаусса (резкость перехода)
-# - Режим координат (geo/helio/both)
-# - Какие тела исключать
+# Этот ноутбук перебирает гиперпараметры XGBoost для двух лучших конфигураций:
+#
+# CONFIG 1 (старый baseline):
+#   geo O=0.25 W=201 S=50.0 -[Uranus,Pluto]
+#   R_MIN=0.578, MCC=0.159
+#
+# CONFIG 2 (новый лучший):
+#   both O=0.15 W=300 S=70
+#   R_MIN=0.587, MCC=0.182
 #
 # ══════════════════════════════════════════════════════════════════════════════════
 
-from RESEARCH.grid_search import GridSearchConfig, run_grid_search, evaluate_combo
+from RESEARCH.grid_search import evaluate_combo
 from RESEARCH.astro_engine import init_ephemeris, calculate_bodies_for_dates_multi, precompute_angles_for_dates
 from RESEARCH.model_training import check_cuda_available
 from itertools import product
@@ -343,147 +346,160 @@ print(f"🖥️ Устройство: {device}")
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
-# 🎛️ НАСТРОЙКИ ПОИСКА — МЕНЯЙТЕ ЗДЕСЬ!
+# 🎛️ КОНФИГУРАЦИИ ДЛЯ ТЕСТИРОВАНИЯ
 # ══════════════════════════════════════════════════════════════════════════════════
 
-# 📊 BASELINE для сравнения
-BASELINE = {
-    "R_MIN": 0.578,
-    "GAP": 0.004,
-    "MCC": 0.159,
-    "config": "geo O=0.25 W=201 S=50.0 -[Uranus,Pluto]"
+# Две лучшие конфигурации астро-параметров
+CONFIGS = {
+    "CONFIG_1": {
+        "name": "Old Baseline (geo -Uranus,Pluto)",
+        "coord_mode": "geo",
+        "orb_mult": 0.25,
+        "gauss_window": 201,
+        "gauss_std": 50.0,
+        "exclude_bodies": ["Uranus", "Pluto"],
+        "baseline_r_min": 0.578,
+        "baseline_mcc": 0.159,
+    },
+    "CONFIG_2": {
+        "name": "New Best (both all bodies)",
+        "coord_mode": "both",
+        "orb_mult": 0.15,
+        "gauss_window": 300,
+        "gauss_std": 70.0,
+        "exclude_bodies": None,
+        "baseline_r_min": 0.587,
+        "baseline_mcc": 0.182,
+    },
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 🌍 РЕЖИМ КООРДИНАТ — выберите один или несколько
-# ──────────────────────────────────────────────────────────────────────────────
-# "geo"   = геоцентрические (классическая астрология)
-# "helio" = гелиоцентрические (научная астрономия)  
-# "both"  = оба режима объединены (больше признаков)
+# ══════════════════════════════════════════════════════════════════════════════════
+# 🌳 XGBOOST HYPERPARAMETERS — ЧТО ПЕРЕБИРАЕМ
+# ══════════════════════════════════════════════════════════════════════════════════
 
-COORD_MODES = ["geo", "helio", "both"]  # ← ПЕРЕБРАТЬ ВСЕ ТРИ
+# n_estimators — количество деревьев
+N_ESTIMATORS = [100, 200, 300, 500, 700]
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 🔮 ОРБ МНОЖИТЕЛИ — насколько точные аспекты ловить
-# ──────────────────────────────────────────────────────────────────────────────
-# 0.25 = очень узкие орбисы (только точные аспекты)
-# 0.5  = узкие орбисы
-# 1.0  = стандартные орбисы
-# 1.5  = широкие орбисы (больше аспектов, больше шума)
+# max_depth — глубина дерева (меньше = меньше переобучения)
+MAX_DEPTHS = [2, 3, 4, 5, 6]
 
-ORB_MULTIPLIERS = [0.1, 0.15, 0.2, 0.25,0.35]  # ← ШИРОКИЙ ДИАПАЗОН
+# learning_rate — скорость обучения
+LEARNING_RATES = [0.01, 0.02, 0.03, 0.05, 0.1]
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 📈 ОКНА ГАУССА — масштаб тренда в днях
-# ──────────────────────────────────────────────────────────────────────────────
-# 51  = ~2.5 месяца (краткосрочные тренды)
-# 101 = ~5 месяцев
-# 151 = ~7.5 месяцев
-# 201 = ~10 месяцев (долгосрочные тренды)
-# 301 = ~15 месяцев (очень долго)
+# subsample — доля данных на каждое дерево
+SUBSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
 
-GAUSS_WINDOWS = [51, 101, 151, 201, 251,300]  # ← РАСШИРЕННЫЙ ДИАПАЗОН
+# colsample_bytree — доля признаков на каждое дерево
+COLSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 🔔 ШИРИНА ГАУССА — резкость переходов UP/DOWN
+# Выбор КАКУЮ конфигурацию тестировать (меняйте здесь!)
 # ──────────────────────────────────────────────────────────────────────────────
-# 20  = резкие переходы (чувствителен к шуму)
-# 50  = средние переходы
-# 80  = плавные переходы
-# 100 = очень плавные
-
-GAUSS_STDS = [20.0, 35.0, 50.0, 70.0, 90.0]  # ← РАСШИРЕННЫЙ ДИАПАЗОН
+ACTIVE_CONFIG = "CONFIG_2"  # ← Изменить на "CONFIG_1" для старого baseline
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 🚫 ИСКЛЮЧАЕМЫЕ ТЕЛА — какие планеты убрать из анализа
+# Режим перебора: "full" или "fast"
 # ──────────────────────────────────────────────────────────────────────────────
-EXCLUDE_BODIES = None  # ← Не исключаем тела (используем все 11)
+# "full" = все комбинации (5^5 = 3125) — ДОЛГО!
+# "fast" = только важные параметры (n_estimators, max_depth, learning_rate)
+SEARCH_MODE = "fast"  # ← Изменить на "full" для полного перебора
 
-# ──────────────────────────────────────────────────────────────────────────────
-# ⚙️ ПАРАМЕТРЫ МОДЕЛИ
-# ──────────────────────────────────────────────────────────────────────────────
-MODEL_PARAMS = {
-    "n_estimators": 300,
-    "max_depth": 3,
-    "learning_rate": 0.03,
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
 # Подсчёт комбинаций
-# ──────────────────────────────────────────────────────────────────────────────
-total_combos = len(COORD_MODES) * len(ORB_MULTIPLIERS) * len(GAUSS_WINDOWS) * len(GAUSS_STDS)
+if SEARCH_MODE == "full":
+    total_combos = len(N_ESTIMATORS) * len(MAX_DEPTHS) * len(LEARNING_RATES) * len(SUBSAMPLES) * len(COLSAMPLES)
+    param_combos = list(product(N_ESTIMATORS, MAX_DEPTHS, LEARNING_RATES, SUBSAMPLES, COLSAMPLES))
+else:
+    total_combos = len(N_ESTIMATORS) * len(MAX_DEPTHS) * len(LEARNING_RATES)
+    param_combos = list(product(N_ESTIMATORS, MAX_DEPTHS, LEARNING_RATES, [0.8], [0.8]))
+
+config = CONFIGS[ACTIVE_CONFIG]
 
 print("=" * 80)
-print("🔬 PARAMETER GRID SEARCH")
+print("🌳 XGBOOST HYPERPARAMETER SEARCH")
 print("=" * 80)
 print(f"""
-📊 BASELINE для сравнения:
-   R_MIN = {BASELINE['R_MIN']:.3f}
-   GAP   = {BASELINE['GAP']:.3f}
-   MCC   = {BASELINE['MCC']:.3f}
-   Config: {BASELINE['config']}
+📊 Тестируем конфигурацию: {config['name']}
+   Coord:    {config['coord_mode']}
+   Orb:      {config['orb_mult']}
+   Window:   {config['gauss_window']}
+   Std:      {config['gauss_std']}
+   Exclude:  {config['exclude_bodies']}
+   
+   📌 BASELINE:
+      R_MIN = {config['baseline_r_min']:.3f}
+      MCC   = {config['baseline_mcc']:.3f}
 
-🎛️ Параметры для перебора:
-   • Coord modes:    {COORD_MODES}
-   • Orb multipliers: {ORB_MULTIPLIERS}
-   • Gauss windows:  {GAUSS_WINDOWS}
-   • Gauss stds:     {GAUSS_STDS}
-   • Excluded bodies: {EXCLUDE_BODIES}
+🎛️ XGBoost параметры для перебора:
+   • n_estimators:    {N_ESTIMATORS}
+   • max_depth:       {MAX_DEPTHS}
+   • learning_rate:   {LEARNING_RATES}
+   • subsample:       {SUBSAMPLES if SEARCH_MODE == 'full' else '[0.8]'}
+   • colsample:       {COLSAMPLES if SEARCH_MODE == 'full' else '[0.8]'}
 
+📈 Режим: {SEARCH_MODE.upper()}
 📈 Всего комбинаций: {total_combos}
    При ~51 расч/мин это займёт ~{total_combos/51:.1f} минут
 """)
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
-# 🚀 ЗАПУСК GRID SEARCH
+# 📍 ПРЕДВАРИТЕЛЬНЫЙ РАСЧЁТ АСТРО-ДАННЫХ
+# ══════════════════════════════════════════════════════════════════════════════════
+
+print("\n📍 Предварительный расчёт позиций...")
+df_bodies, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
+    df_market["date"], settings, coord_mode=config["coord_mode"], progress=True
+)
+bodies_by_date = geo_by_date if geo_by_date else helio_by_date
+
+print("\n📐 Предварительный расчёт углов...")
+angles_cache = precompute_angles_for_dates(bodies_by_date, progress=True)
+
+print("✓ Кэш готов!\n")
+
+# %%
+# ══════════════════════════════════════════════════════════════════════════════════
+# 🚀 ЗАПУСК HYPERPARAMETER SEARCH
 # ══════════════════════════════════════════════════════════════════════════════════
 
 results = []
 best_so_far = {"R_MIN": 0, "combo": None}
 
-# Предварительный расчёт позиций для всех coord_modes
-print("\n📍 Предварительный расчёт позиций...")
-cached_bodies = {}
-cached_angles = {}
-
-for coord_mode in COORD_MODES:
-    print(f"   Computing {coord_mode}...")
-    df_bodies, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
-        df_market["date"], settings, coord_mode=coord_mode, progress=False
-    )
-    bodies_by_date = geo_by_date if geo_by_date else helio_by_date
-    cached_bodies[coord_mode] = (df_bodies, geo_by_date, helio_by_date)
-    
-    print(f"   Computing angles for {coord_mode}...")
-    cached_angles[coord_mode] = precompute_angles_for_dates(bodies_by_date, progress=False)
-
-print("✓ Кэш готов!\n")
-
-# Генерируем все комбинации
-combos = list(product(COORD_MODES, ORB_MULTIPLIERS, GAUSS_WINDOWS, GAUSS_STDS))
-print(f"🔢 Всего комбинаций: {len(combos)}")
+print(f"🔢 Всего комбинаций: {len(param_combos)}")
 print("=" * 80)
 
-for i, (coord_mode, orb, gw, gs) in enumerate(combos):
-    params_str = f"[{i+1}/{len(combos)}] {coord_mode} O={orb} W={gw} S={gs}"
+for i, params in enumerate(param_combos):
+    if SEARCH_MODE == "full":
+        n_est, max_d, lr, subsample, colsample = params
+    else:
+        n_est, max_d, lr, subsample, colsample = params
+    
+    model_params = {
+        "n_estimators": n_est,
+        "max_depth": max_d,
+        "learning_rate": lr,
+        "subsample": subsample,
+        "colsample_bytree": colsample,
+    }
+    
+    params_str = f"[{i+1}/{len(param_combos)}] n={n_est} d={max_d} lr={lr}"
+    if SEARCH_MODE == "full":
+        params_str += f" sub={subsample} col={colsample}"
     
     try:
-        df_bodies, geo_by_date, helio_by_date = cached_bodies[coord_mode]
-        bodies_by_date = geo_by_date if geo_by_date else helio_by_date
-        
         res = evaluate_combo(
             df_market, df_bodies, bodies_by_date, settings,
-            orb, gw, gs,
-            exclude_bodies=EXCLUDE_BODIES,
-            angles_cache=cached_angles.get(coord_mode),
+            config["orb_mult"], config["gauss_window"], config["gauss_std"],
+            exclude_bodies=config["exclude_bodies"],
+            angles_cache=angles_cache,
             device=device,
-            model_params=MODEL_PARAMS,
+            model_params=model_params,
         )
-        res["coord_mode"] = coord_mode
-        res["orb_mult"] = orb
-        res["gauss_window"] = gw
-        res["gauss_std"] = gs
+        res["n_estimators"] = n_est
+        res["max_depth"] = max_d
+        res["learning_rate"] = lr
+        res["subsample"] = subsample
+        res["colsample"] = colsample
         results.append(res)
         
         if "error" not in res:
@@ -493,60 +509,59 @@ for i, (coord_mode, orb, gw, gs) in enumerate(combos):
             # Update best
             if r_min > best_so_far["R_MIN"]:
                 best_so_far["R_MIN"] = r_min
-                best_so_far["combo"] = f"{coord_mode} O={orb} W={gw} S={gs}"
                 best_so_far["MCC"] = mcc
+                best_so_far["combo"] = f"n={n_est} d={max_d} lr={lr}"
+                best_so_far["params"] = model_params.copy()
             
-            print(f"{params_str:<45} → R_MIN={r_min:.3f} MCC={mcc:.3f}")
+            print(f"{params_str:<50} → R_MIN={r_min:.3f} MCC={mcc:.3f}")
             print(f"   🏆 BEST: R_MIN={best_so_far['R_MIN']:.3f} ({best_so_far['combo']})")
         else:
-            print(f"{params_str:<45} → ERROR: {res.get('error')}")
+            print(f"{params_str:<50} → ERROR: {res.get('error')}")
             
     except Exception as e:
-        print(f"{params_str:<45} → CRASH: {e}")
+        print(f"{params_str:<50} → CRASH: {e}")
         results.append({
-            "coord_mode": coord_mode, "orb_mult": orb, 
-            "gauss_window": gw, "gauss_std": gs, "error": str(e)
+            "n_estimators": n_est, "max_depth": max_d,
+            "learning_rate": lr, "error": str(e)
         })
 
 # %%
-# RESULTS — сравнение с BASELINE
+# ══════════════════════════════════════════════════════════════════════════════════
+# 📊 RESULTS
+# ══════════════════════════════════════════════════════════════════════════════════
+
 print("\n" + "=" * 80)
-print("📊 RESULTS: PARAMETER GRID SEARCH vs BASELINE")
+print("📊 RESULTS: XGBOOST HYPERPARAMETER SEARCH")
 print("=" * 80)
 
 print(f"""
-📌 BASELINE для сравнения:
-   R_MIN = {BASELINE['R_MIN']:.3f}
-   GAP   = {BASELINE['GAP']:.3f}  
-   MCC   = {BASELINE['MCC']:.3f}
-   Config: {BASELINE['config']}
+📌 Config: {config['name']}
+📌 BASELINE:
+   R_MIN = {config['baseline_r_min']:.3f}
+   MCC   = {config['baseline_mcc']:.3f}
 """)
 
 results_df = pd.DataFrame(results)
 
 if "recall_min" in results_df.columns:
     # Добавляем delta относительно baseline
-    results_df["delta_R_MIN"] = results_df["recall_min"] - BASELINE["R_MIN"]
-    results_df["delta_MCC"] = results_df["mcc"] - BASELINE["MCC"]
+    results_df["delta_R_MIN"] = results_df["recall_min"] - config["baseline_r_min"]
+    results_df["delta_MCC"] = results_df["mcc"] - config["baseline_mcc"]
     
     # Сортируем по recall_min
     results_df = results_df.sort_values("recall_min", ascending=False).reset_index(drop=True)
     
     # Топ-20 результатов
-    print("\n🏆 TOP 20 BEST COMBINATIONS:")
-    print("-" * 90)
-    print(f"{'#':<3} {'Coord':<6} {'Orb':<6} {'Win':<5} {'Std':<5} {'R_MIN':<7} {'Δ R_MIN':<9} {'MCC':<7} {'Status':<10}")
-    print("-" * 90)
+    print("\n🏆 TOP 20 BEST HYPERPARAMETER COMBINATIONS:")
+    print("-" * 100)
+    print(f"{'#':<3} {'n_est':<6} {'depth':<6} {'lr':<6} {'sub':<5} {'col':<5} {'R_MIN':<7} {'Δ R_MIN':<9} {'MCC':<7} {'Status':<10}")
+    print("-" * 100)
     
     for i, row in results_df.head(20).iterrows():
         if "error" in row and pd.notna(row.get("error")):
             continue
             
         delta_r = row.get("delta_R_MIN", 0)
-        coord = row.get("coord_mode", "?")
-        orb = row.get("orb_mult", 0)
-        win = row.get("gauss_window", 0)
-        std = row.get("gauss_std", 0)
         
         if delta_r > 0:
             status = "✅ BETTER"
@@ -555,61 +570,291 @@ if "recall_min" in results_df.columns:
         else:
             status = "❌ WORSE"
         
-        print(f"{i+1:<3} {coord:<6} {orb:<6} {win:<5} {std:<5.0f} {row['recall_min']:<7.3f} {delta_r:<+9.3f} {row['mcc']:<7.3f} {status:<10}")
+        print(f"{i+1:<3} {row['n_estimators']:<6} {row['max_depth']:<6} {row['learning_rate']:<6} "
+              f"{row['subsample']:<5} {row['colsample']:<5} "
+              f"{row['recall_min']:<7.3f} {delta_r:<+9.3f} {row['mcc']:<7.3f} {status:<10}")
     
-    print("-" * 90)
-    print(f"{'---':<3} {'BASE':<6} {'0.25':<6} {'201':<5} {'50':<5} {BASELINE['R_MIN']:<7.3f} {'---':<9} {BASELINE['MCC']:<7.3f}")
+    print("-" * 100)
+    print(f"{'---':<3} {'300':<6} {'3':<6} {'0.03':<6} {'0.8':<5} {'0.8':<5} "
+          f"{config['baseline_r_min']:<7.3f} {'---':<9} {config['baseline_mcc']:<7.3f} BASELINE")
     
-    # Анализ по coord_mode
-    print("\n📊 SUMMARY BY COORD_MODE:")
-    for cm in COORD_MODES:
-        subset = results_df[results_df["coord_mode"] == cm]
+    # Анализ по параметрам
+    print("\n📊 ANALYSIS BY PARAMETER:")
+    
+    print("\n   By n_estimators:")
+    for n in N_ESTIMATORS:
+        subset = results_df[results_df["n_estimators"] == n]
         if not subset.empty:
             best_r = subset["recall_min"].max()
             avg_r = subset["recall_min"].mean()
-            print(f"   {cm:6}: best R_MIN={best_r:.3f}, avg={avg_r:.3f}")
+            print(f"      n={n:<4}: best R_MIN={best_r:.3f}, avg={avg_r:.3f}")
+    
+    print("\n   By max_depth:")
+    for d in MAX_DEPTHS:
+        subset = results_df[results_df["max_depth"] == d]
+        if not subset.empty:
+            best_r = subset["recall_min"].max()
+            avg_r = subset["recall_min"].mean()
+            print(f"      d={d}: best R_MIN={best_r:.3f}, avg={avg_r:.3f}")
+    
+    print("\n   By learning_rate:")
+    for lr in LEARNING_RATES:
+        subset = results_df[results_df["learning_rate"] == lr]
+        if not subset.empty:
+            best_r = subset["recall_min"].max()
+            avg_r = subset["recall_min"].mean()
+            print(f"      lr={lr:<5}: best R_MIN={best_r:.3f}, avg={avg_r:.3f}")
 
 # Save
-out_path = PROJECT_ROOT / "data" / "market" / "reports" / "param_grid_results.csv"
+out_path = PROJECT_ROOT / "data" / "market" / "reports" / f"xgb_hyperparam_{ACTIVE_CONFIG}.csv"
 results_df.to_csv(out_path, index=False)
 print(f"\n💾 Results saved: {out_path}")
 
 # Best overall
 if not results_df.empty and "recall_min" in results_df.columns:
     best = results_df.iloc[0]
-    delta = best['recall_min'] - BASELINE['R_MIN']
-    print(f"\n🏆 BEST COMBINATION:")
-    print(f"   Coord:  {best.get('coord_mode', '?')}")
-    print(f"   Orb:    {best.get('orb_mult', '?')}")
-    print(f"   Window: {best.get('gauss_window', '?')}")
-    print(f"   Std:    {best.get('gauss_std', '?')}")
+    delta = best['recall_min'] - config['baseline_r_min']
+    print(f"\n🏆 BEST HYPERPARAMETERS:")
+    print(f"   n_estimators:    {best['n_estimators']}")
+    print(f"   max_depth:       {best['max_depth']}")
+    print(f"   learning_rate:   {best['learning_rate']}")
+    print(f"   subsample:       {best['subsample']}")
+    print(f"   colsample:       {best['colsample']}")
     print(f"   R_MIN = {best['recall_min']:.3f} (Δ {delta:+.3f} vs baseline)")
     print(f"   MCC   = {best['mcc']:.3f}")
     
     if delta > 0:
         print(f"\n   🎯 NEW BEST found! Beats baseline by {delta:+.3f}!")
     else:
-        print(f"\n   ⚠️ No combination beats the baseline.")
+        print(f"\n   ⚠️ No combination beats the baseline. Best params are already optimal.")
 
 # %%
-# BODY ABLATION ONLY (uncomment to run)
-# Use current params, test all body exclusion combinations
+# ══════════════════════════════════════════════════════════════════════════════════
+# 📊 FULL ANALYSIS — CONFUSION MATRIX & VISUALIZATIONS
+# ══════════════════════════════════════════════════════════════════════════════════
+#
+# Обучаем финальную модель с лучшими гиперпараметрами и показываем:
+# - Classification Report
+# - Confusion Matrix
+# - Predictions vs True (график)
+# - Feature Importance
+#
+# ══════════════════════════════════════════════════════════════════════════════════
 
-# from RESEARCH.grid_search import run_body_ablation_search
-# 
-# ablation_df = run_body_ablation_search(
-#     df_market,
-#     orb_mult=ORB_MULTIPLIER,
-#     gauss_window=LABEL_CONFIG["gauss_window"],
-#     gauss_std=LABEL_CONFIG["gauss_std"],
-#     max_exclude=3,  # Try removing up to 3 bodies
-# )
+print("\n" + "=" * 80)
+print("🔍 FULL ANALYSIS WITH BEST HYPERPARAMETERS")
+print("=" * 80)
 
-# %% [markdown]
-# ## 10. Save Model
+# Получаем лучшие параметры
+if best_so_far.get("params"):
+    BEST_PARAMS = best_so_far["params"]
+else:
+    BEST_PARAMS = {
+        "n_estimators": 300,
+        "max_depth": 3,
+        "learning_rate": 0.03,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+    }
+
+print(f"\n🌳 Using hyperparameters: {BEST_PARAMS}")
+print(f"🌍 Config: {config['name']}")
 
 # %%
-# Save model
+# Импорты для полного анализа
+from RESEARCH.labeling import create_balanced_labels
+from RESEARCH.features import build_full_features, get_feature_inventory
+from RESEARCH.astro_engine import calculate_aspects_for_dates
+from RESEARCH.model_training import (
+    train_xgb_model, 
+    prepare_train_test_split, 
+    tune_threshold_max_min_recall
+)
+from RESEARCH.visualization import (
+    plot_confusion_matrix,
+    plot_predictions,
+    plot_feature_importance,
+)
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+
+# %%
+# Создаём метки с лучшими параметрами Гаусса
+print("\n📍 Creating labels...")
+df_labels = create_balanced_labels(
+    df_market,
+    horizon=1,
+    move_share=0.5,
+    gauss_window=config["gauss_window"],
+    gauss_std=config["gauss_std"],
+    price_mode="raw",
+    label_mode="balanced_detrended",
+)
+print(f"   Labels created: {len(df_labels)} rows")
+print(f"   Distribution: {df_labels['label'].value_counts().to_dict()}")
+
+# %%
+# Вычисляем аспекты
+print("\n📐 Calculating aspects...")
+df_aspects = calculate_aspects_for_dates(
+    bodies_by_date,
+    settings,
+    orb_mult=config["orb_mult"],
+    progress=True,
+)
+print(f"   Aspects: {len(df_aspects)} rows")
+
+# %%
+# Строим признаки
+print("\n🔧 Building features...")
+df_features = build_full_features(
+    df_bodies,
+    df_aspects,
+    df_transits=None,
+    include_pair_aspects=True,
+    include_transit_aspects=False,
+    exclude_bodies=config["exclude_bodies"],
+)
+print(f"   Features shape: {df_features.shape}")
+
+# %%
+# Объединяем с метками
+from RESEARCH.features import merge_features_with_labels
+df_dataset = merge_features_with_labels(df_features, df_labels)
+print(f"   Dataset shape: {df_dataset.shape}")
+
+# %%
+# Train/Test split
+print("\n📊 Splitting data...")
+train_df, test_df, feature_cols = prepare_train_test_split(
+    df_dataset, test_size=0.2, random_state=42
+)
+print(f"   Train: {len(train_df)}, Test: {len(test_df)}")
+
+X_train, y_train = train_df[feature_cols], train_df["label"]
+X_test, y_test = test_df[feature_cols], test_df["label"]
+
+# %%
+# Обучаем модель с лучшими параметрами
+print("\n🌳 Training XGBoost with best hyperparameters...")
+model = train_xgb_model(
+    X_train, y_train,
+    model_params=BEST_PARAMS,
+    device=device,
+)
+print("   ✓ Model trained!")
+
+# %%
+# Тюним порог
+print("\n🎯 Tuning threshold...")
+best_threshold, metrics = tune_threshold_max_min_recall(model, X_test, y_test)
+print(f"   Best threshold: {best_threshold:.3f}")
+print(f"   Metrics: {metrics}")
+
+# %%
+# Предсказания
+y_pred_proba = model.predict_proba(X_test)[:, 1]
+y_pred = (y_pred_proba >= best_threshold).astype(int)
+
+# %%
+# Classification Report
+print("\n" + "=" * 80)
+print("📊 CLASSIFICATION REPORT")
+print("=" * 80)
+print(classification_report(y_test, y_pred, target_names=["DOWN", "UP"]))
+
+# %%
+# Confusion Matrix
+print("\n" + "=" * 80)
+print("🔢 CONFUSION MATRIX")
+print("=" * 80)
+
+cm = confusion_matrix(y_test, y_pred)
+print(f"\n         Predicted")
+print(f"         DOWN   UP")
+print(f"Actual DOWN  {cm[0,0]:4d}  {cm[0,1]:4d}")
+print(f"       UP    {cm[1,0]:4d}  {cm[1,1]:4d}")
+
+# Recall по классам
+recall_down = cm[0,0] / (cm[0,0] + cm[0,1]) if (cm[0,0] + cm[0,1]) > 0 else 0
+recall_up = cm[1,1] / (cm[1,0] + cm[1,1]) if (cm[1,0] + cm[1,1]) > 0 else 0
+recall_min = min(recall_down, recall_up)
+recall_gap = abs(recall_up - recall_down)
+
+print(f"\n📈 Recall DOWN: {recall_down:.3f}")
+print(f"📈 Recall UP:   {recall_up:.3f}")
+print(f"📈 R_MIN:       {recall_min:.3f}")
+print(f"📈 Gap:         {recall_gap:.3f}")
+
+# %%
+# Plot Confusion Matrix
+print("\n📊 Plotting confusion matrix...")
+fig, ax = plt.subplots(figsize=(8, 6))
+plot_confusion_matrix(y_test, y_pred, ax=ax, title="Confusion Matrix (Best Hyperparams)")
+plt.tight_layout()
+plt.show()
+
+# %%
+# Plot Predictions vs Actual
+print("\n📈 Plotting predictions...")
+
+# Добавляем цены для визуализации
+test_df_plot = test_df.copy()
+test_df_plot["date"] = pd.to_datetime(test_df_plot["date"])
+test_df_plot = test_df_plot.merge(
+    df_market[["date", "close"]].assign(date=lambda x: pd.to_datetime(x["date"])), 
+    on="date", 
+    how="left"
+)
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+# Plot 1: Price with predictions
+ax1 = axes[0]
+ax1.plot(test_df_plot["date"], test_df_plot["close"], 'k-', alpha=0.7, label="Price")
+
+# Highlight predictions
+up_mask = y_pred == 1
+down_mask = y_pred == 0
+ax1.scatter(test_df_plot["date"][up_mask], test_df_plot["close"][up_mask], 
+            c='green', alpha=0.5, s=20, label="Pred UP")
+ax1.scatter(test_df_plot["date"][down_mask], test_df_plot["close"][down_mask], 
+            c='red', alpha=0.5, s=20, label="Pred DOWN")
+ax1.set_ylabel("Price")
+ax1.set_title("Predictions on Test Data")
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+# Plot 2: Accuracy over time (rolling)
+ax2 = axes[1]
+correct = (y_pred == y_test.values).astype(int)
+rolling_acc = pd.Series(correct).rolling(50, min_periods=10).mean()
+ax2.plot(test_df_plot["date"], rolling_acc, 'b-', linewidth=2)
+ax2.axhline(y=0.5, color='r', linestyle='--', label="Random (50%)")
+ax2.axhline(y=recall_min, color='g', linestyle='--', label=f"Avg R_MIN ({recall_min:.1%})")
+ax2.set_ylabel("Rolling Accuracy (50-day window)")
+ax2.set_xlabel("Date")
+ax2.set_title("Model Accuracy Over Time")
+ax2.legend()
+ax2.grid(True, alpha=0.3)
+ax2.set_ylim(0, 1)
+
+plt.tight_layout()
+plt.show()
+
+# %%
+# Feature Importance
+print("\n📊 Feature Importance (Top 20)...")
+fig, ax = plt.subplots(figsize=(12, 8))
+plot_feature_importance(model, feature_cols, top_n=20, ax=ax)
+plt.tight_layout()
+plt.show()
+
+# %%
+# ══════════════════════════════════════════════════════════════════════════════════
+# 💾 SAVE FINAL MODEL
+# ══════════════════════════════════════════════════════════════════════════════════
+
 from joblib import dump
 
 artifact_dir = PROJECT_ROOT / "models_artifacts"
@@ -621,27 +866,36 @@ artifact = {
     "feature_names": feature_cols,
     "threshold": best_threshold,
     "config": {
-        "label_config": LABEL_CONFIG,
-        "orb_multiplier": ORB_MULTIPLIER,
-        "model_params": MODEL_PARAMS,
+        "astro_config": config,
+        "xgb_params": BEST_PARAMS,
     },
+    "metrics": {
+        "recall_up": recall_up,
+        "recall_down": recall_down,
+        "recall_min": recall_min,
+        "recall_gap": recall_gap,
+    }
 }
 
-out_path = artifact_dir / f"xgb_astro_research.joblib"
+model_name = f"xgb_astro_{ACTIVE_CONFIG.lower()}.joblib"
+out_path = artifact_dir / model_name
 dump(artifact, out_path)
-print(f"✓ Model saved: {out_path}")
+print(f"\n💾 Model saved: {out_path}")
 
-# %% [markdown]
-# ---
-# ## Summary
-# 
-# This modular pipeline makes it easy to:
-# - **Debug**: Each module can be tested independently
-# - **Extend**: Add new features, models, or visualizations
-# - **Experiment**: Quickly try different configurations
-# 
-# ### TODO:
-# - [ ] Add moon phases to features
-# - [ ] Grid search for astro body exclusion
-# - [ ] Add houses for birth date grid search
-# - [ ] Save best grid search results
+print("\n" + "=" * 80)
+print("✅ ANALYSIS COMPLETE!")
+print("=" * 80)
+print(f"""
+📊 Final Results:
+   Config:     {config['name']}
+   R_MIN:      {recall_min:.3f}
+   R_UP:       {recall_up:.3f}
+   R_DOWN:     {recall_down:.3f}
+   Gap:        {recall_gap:.3f}
+   Threshold:  {best_threshold:.3f}
+   
+🌳 Best XGBoost Params:
+   {BEST_PARAMS}
+   
+💾 Model saved to: {out_path}
+""")
