@@ -1,61 +1,61 @@
 # RESEARCH — Astro Trading Research Pipeline
 
-Модульный пайплайн для исследования корреляций между астрологическими данными и движениями рынка криптовалют.
+Modular pipeline for researching correlations between astrological data and cryptocurrency market movements.
 
-## Быстрый старт
+## Quick Start
 
-### 1. Создание/активация окружения Conda
+### 1. Create/Activate Conda Environment
 
 ```bash
-# Если окружение btc уже есть:
+# If the btc environment already exists:
 conda activate btc
 
-# Или создайте новое:
+# Or create a new one:
 conda create -n btc python=3.12 -y
 conda activate btc
 ```
 
-### 2. Установка зависимостей
+### 2. Install Dependencies
 
-**Вариант A — Одной командой (рекомендуется):**
+**Option A — Single Command (recommended):**
 
 ```bash
-# Основные DS/ML пакеты + psycopg2 через conda
+# Core DS/ML packages + psycopg2 via conda
 conda install -c conda-forge xgboost scikit-learn matplotlib seaborn tqdm pyarrow psycopg2 ipykernel joblib pandas numpy scipy -y
 
-# Астро-движок (нет в conda, ставим через pip)
+# Astro engine (not available in conda, install via pip)
 pip install pyswisseph
 ```
 
-**Вариант B — Через pip (если conda не используется):**
+**Option B — Via pip (if not using conda):**
 
 ```bash
 pip install -r RESEARCH/requirements.txt
 ```
 
-### 3. Запуск в VS Code (интерактивный режим)
+### 3. Run in VS Code (Interactive Mode)
 
-1. Откройте `RESEARCH/main_pipeline.py`
-2. Убедитесь, что выбран интерпретатор `btc` (`Ctrl+Shift+P` → `Python: Select Interpreter`)
-3. Нажмите `Shift+Enter` на любой ячейке (маркер `# %%`) или кликните **Run Cell**
+1. Open `RESEARCH/main_pipeline.py`
+2. Make sure the `btc` interpreter is selected (`Ctrl+Shift+P` → `Python: Select Interpreter`)
+3. Press `Shift+Enter` on any cell (marked with `# %%`) or click **Run Cell**
 
-## Структура модулей
+## Module Structure
 
-| Модуль | Описание |
-|--------|----------|
-| `config.py` | Конфигурация проекта (пути, настройки БД, субъекты) |
-| `data_loader.py` | Загрузка рыночных данных из PostgreSQL |
-| `labeling.py` | Создание сбалансированных меток UP/DOWN |
-| `astro_engine.py` | Расчёт планетарных позиций и аспектов (Swiss Ephemeris) |
-| `features.py` | Построение матрицы признаков |
-| `model_training.py` | Обучение XGBoost, подбор порога |
-| `visualization.py` | Графики: цена, распределения, confusion matrix |
-| `grid_search.py` | Поиск по сетке параметров |
-| `main_pipeline.py` | **Главный файл** — оркестрирует весь пайплайн |
+| Module | Description |
+|--------|-------------|
+| `config.py` | Project configuration (paths, DB settings, subjects) |
+| `data_loader.py` | Load market data from PostgreSQL |
+| `labeling.py` | Create balanced UP/DOWN labels |
+| `astro_engine.py` | Calculate planetary positions and aspects (Swiss Ephemeris) |
+| `features.py` | Build feature matrix |
+| `model_training.py` | Train XGBoost, tune threshold |
+| `visualization.py` | Charts: price, distributions, confusion matrix |
+| `grid_search.py` | Grid search over parameter space |
+| `main_pipeline.py` | **Main file** — orchestrates the entire pipeline |
 
-## Проверка зависимостей
+## Dependency Check
 
-Запустите первую ячейку `main_pipeline.py` — она покажет недостающие пакеты:
+Run the first cell of `main_pipeline.py` — it will show any missing packages:
 
 ```python
 # %%
