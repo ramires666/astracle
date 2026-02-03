@@ -54,6 +54,7 @@ from RESEARCH.astro.aspects import (
 from RESEARCH.numba_utils import warmup_jit, check_numba_available
 from RESEARCH.features import build_full_features, merge_features_with_labels, get_feature_columns
 from RESEARCH.model_training import split_dataset, prepare_xy, check_cuda_available, calc_metrics
+from sklearn.utils.class_weight import compute_sample_weight
 
 # %% [markdown]
 # ## Configuration
@@ -273,7 +274,9 @@ for i, (_, row) in enumerate(top_candidates.iterrows()):
     search = RandomizedSearchCV(
         xgb_model, PARAM_DIST, n_iter=iter_limit, 
         scoring=RECALL_MIN_SCORER,  # Custom: min(recall_up, recall_down)
-        cv=ps, n_jobs=N_JOBS, verbose=0, random_state=42, refit=False
+        cv=ps, n_jobs=N_JOBS, verbose=0, 
+        random_state=42 + i,  # Different seed for each candidate = explore different HP combos
+        refit=False
     )
     
     try:
@@ -287,7 +290,7 @@ for i, (_, row) in enumerate(top_candidates.iterrows()):
             tree_method='hist' if device == 'cuda' else 'auto',
             **best_params
         )
-        final_model.fit(X_train, y_train)
+        final_model.fit(X_train, y_train, sample_weight=compute_sample_weight('balanced', y_train))
         y_pred_val = final_model.predict(X_val)
         metrics = calc_metrics(y_val, y_pred_val, labels=[0, 1])
         
