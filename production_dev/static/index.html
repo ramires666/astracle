@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Astro Predictor | AI-Powered Price Forecast</title>
+    <meta name="description" content="Advanced Bitcoin price direction predictions using astrological analysis and machine learning.">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="bg-gradient"></div>
+    <div class="stars"></div>
+    
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">☿</span>
+                <div class="logo-text">
+                    <h1>Bitcoin Astro Predictor</h1>
+                    <p class="tagline">AI-Powered Price Direction Forecast</p>
+                </div>
+            </div>
+            <div class="header-stats" id="header-stats">
+                <div class="stat-badge loading">
+                    <span class="stat-label">Model Status</span>
+                    <span class="stat-value" id="model-status">Loading...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Model Info Card -->
+        <section class="model-card glass">
+            <div class="model-header">
+                <h2>📊 Model Configuration</h2>
+                <span class="model-badge" id="accuracy-badge">R_MIN: --</span>
+            </div>
+            <div class="model-details" id="model-details">
+                <div class="detail-item">
+                    <span class="detail-label">Natal Date</span>
+                    <span class="detail-value" id="natal-date">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Coord Mode</span>
+                    <span class="detail-value" id="coord-mode">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Orb Multiplier</span>
+                    <span class="detail-value" id="orb-mult">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">XGBoost Trees</span>
+                    <span class="detail-value" id="n-estimators">--</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls glass">
+            <div class="control-group">
+                <label for="days-slider">Forecast Period</label>
+                <div class="slider-container">
+                    <input type="range" id="days-slider" min="7" max="180" value="90" step="1">
+                    <span class="slider-value" id="days-value">90 days</span>
+                </div>
+            </div>
+            <button class="btn-primary" id="predict-btn">
+                <span class="btn-icon">🔮</span>
+                Generate Forecast
+            </button>
+        </section>
+
+        <!-- Chart Section -->
+        <section class="chart-section glass">
+            <div class="chart-header">
+                <h2>📈 Price Prediction Chart</h2>
+                <div class="chart-legend">
+                    <span class="legend-item up">▲ UP Day</span>
+                    <span class="legend-item down">▼ DOWN Day</span>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="prediction-chart"></canvas>
+                <div class="chart-loading" id="chart-loading">
+                    <div class="spinner"></div>
+                    <p>Calculating planetary positions...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Summary Cards -->
+        <section class="summary-grid" id="summary-section" style="display: none;">
+            <div class="summary-card glass green">
+                <span class="summary-icon">📈</span>
+                <div class="summary-content">
+                    <span class="summary-value" id="up-count">0</span>
+                    <span class="summary-label">UP Days</span>
+                </div>
+            </div>
+            <div class="summary-card glass red">
+                <span class="summary-icon">📉</span>
+                <div class="summary-content">
+                    <span class="summary-value" id="down-count">0</span>
+                    <span class="summary-label">DOWN Days</span>
+                </div>
+            </div>
+            <div class="summary-card glass gold">
+                <span class="summary-icon">🎯</span>
+                <div class="summary-content">
+                    <span class="summary-value" id="avg-confidence">0%</span>
+                    <span class="summary-label">Avg Confidence</span>
+                </div>
+            </div>
+            <div class="summary-card glass purple">
+                <span class="summary-icon">💰</span>
+                <div class="summary-content">
+                    <span class="summary-value" id="price-change">+0%</span>
+                    <span class="summary-label">Simulated Change</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Predictions Table -->
+        <section class="predictions-table glass" id="table-section" style="display: none;">
+            <div class="table-header">
+                <h2>📋 Daily Predictions</h2>
+                <button class="btn-secondary" id="export-btn">
+                    Export CSV
+                </button>
+            </div>
+            <div class="table-wrapper">
+                <table id="predictions-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Direction</th>
+                            <th>Confidence</th>
+                            <th>Simulated Price</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Filled by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>⚠️ <strong>Disclaimer:</strong> This is an experimental tool for educational purposes only. 
+               Not financial advice. Past astrological correlations do not guarantee future results.</p>
+            <p class="footer-meta">
+                Bitcoin Astro Predictor v1.0 | Model: XGBoost + Swiss Ephemeris
+            </p>
+        </footer>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

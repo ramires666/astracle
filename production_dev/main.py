@@ -1,0 +1,257 @@
+"""
+Bitcoin Astro Prediction API
+
+FastAPI application providing Bitcoin price direction predictions based on
+astrological analysis. Uses XGBoost model trained on natal chart transits.
+
+Endpoints:
+- GET /           → Serves web UI
+- GET /api/predict → Returns 90-day forecast JSON
+- GET /api/health  → Health check
+
+Port: 9742 (non-standard)
+"""
+
+import os
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from production_dev.predictor import BtcAstroPredictor
+from production_dev.schemas import ForecastResponse, HealthResponse, PredictionItem
+
+# =============================================================================
+# APPLICATION CONFIGURATION
+# =============================================================================
+
+APP_CONFIG = {
+    "title": "Bitcoin Astro Predictor",
+    "description": "AI-powered Bitcoin price direction predictions using astrological analysis",
+    "version": "1.0.0",
+    "port": 9742,  # Non-standard port
+}
+
+# =============================================================================
+# FASTAPI APPLICATION
+# =============================================================================
+
+app = FastAPI(
+    title=APP_CONFIG["title"],
+    description=APP_CONFIG["description"],
+    version=APP_CONFIG["version"],
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
+
+# CORS middleware for frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Static files for web UI
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# =============================================================================
+# GLOBAL STATE
+# =============================================================================
+
+# Lazy-loaded predictor instance
+_predictor: Optional[BtcAstroPredictor] = None
+
+
+def get_predictor() -> BtcAstroPredictor:
+    """
+    Get or initialize the predictor instance.
+    Uses lazy loading to avoid slow startup.
+    """
+    global _predictor
+    if _predictor is None:
+        _predictor = BtcAstroPredictor()
+        if not _predictor.load_model():
+            raise RuntimeError("Failed to load prediction model")
+    return _predictor
+
+
+# =============================================================================
+# API ENDPOINTS
+# =============================================================================
+
+@app.get("/", response_class=FileResponse)
+async def serve_frontend():
+    """
+    Serve the main web interface.
+    """
+    index_path = STATIC_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Frontend not found")
+    return FileResponse(str(index_path))
+
+
+@app.get("/api/health", response_model=HealthResponse)
+async def health_check():
+    """
+    Health check endpoint.
+    
+    Returns service status and model information.
+    """
+    try:
+        predictor = get_predictor()
+        model_info = predictor.get_model_info()
+        
+        return HealthResponse(
+            status="healthy",
+            timestamp=datetime.utcnow().isoformat(),
+            model_loaded=model_info["is_loaded"],
+            natal_date=model_info.get("natal_date", "unknown"),
+            expected_accuracy=model_info.get("expected_r_min", 0.0),
+        )
+    except Exception as e:
+        return HealthResponse(
+            status="unhealthy",
+            timestamp=datetime.utcnow().isoformat(),
+            model_loaded=False,
+            error=str(e),
+        )
+
+
+@app.get("/api/predict", response_model=ForecastResponse)
+async def get_predictions(
+    days: int = 90,
+    seed: Optional[int] = None,
+):
+    """
+    Generate Bitcoin price direction predictions.
+    
+    Args:
+        days: Number of days to predict (1-365, default: 90)
+        seed: Random seed for reproducible price simulation
+        
+    Returns:
+        ForecastResponse with predictions and simulated prices
+    """
+    # Validate input
+    if days < 1 or days > 365:
+        raise HTTPException(
+            status_code=400,
+            detail="Days must be between 1 and 365"
+        )
+    
+    try:
+        predictor = get_predictor()
+        
+        # Generate predictions
+        predictions = predictor.predict_next_n_days(days)
+        
+        # Add simulated price path
+        predictions = predictor.generate_price_path(predictions, seed=seed)
+        
+        # Calculate summary statistics
+        up_count = sum(1 for p in predictions if p["direction"] == "UP")
+        down_count = len(predictions) - up_count
+        avg_confidence = sum(p["confidence"] for p in predictions) / len(predictions)
+        
+        # Convert to response model
+        prediction_items = [
+            PredictionItem(
+                date=p["date"],
+                direction=p["direction"],
+                confidence=p["confidence"],
+                simulated_price=p.get("simulated_price", 0.0),
+            )
+            for p in predictions
+        ]
+        
+        return ForecastResponse(
+            predictions=prediction_items,
+            summary={
+                "total_days": len(predictions),
+                "up_predictions": up_count,
+                "down_predictions": down_count,
+                "up_ratio": round(up_count / len(predictions), 3),
+                "average_confidence": round(avg_confidence, 3),
+                "start_price": predictions[0].get("simulated_price", 0.0) if predictions else 0.0,
+                "end_price": predictions[-1].get("simulated_price", 0.0) if predictions else 0.0,
+            },
+            model_info=predictor.get_model_info(),
+            generated_at=datetime.utcnow().isoformat(),
+        )
+        
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+
+@app.get("/api/config")
+async def get_config():
+    """
+    Get current model configuration.
+    """
+    try:
+        predictor = get_predictor()
+        return JSONResponse(content=predictor.get_model_info())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# STARTUP / SHUTDOWN EVENTS
+# =============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Application startup handler.
+    Pre-loads the model for faster first request.
+    """
+    print(f"🚀 Starting {APP_CONFIG['title']} v{APP_CONFIG['version']}")
+    print(f"📡 API available at http://localhost:{APP_CONFIG['port']}")
+    print(f"📊 Web UI available at http://localhost:{APP_CONFIG['port']}/")
+    
+    # Optionally pre-load model
+    try:
+        get_predictor()
+        print("✅ Model loaded successfully")
+    except Exception as e:
+        print(f"⚠️ Model not loaded: {e}")
+        print("   Model will be loaded on first prediction request")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Application shutdown handler.
+    """
+    print("👋 Shutting down Bitcoin Astro Predictor")
+
+
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=APP_CONFIG["port"],
+        reload=True,  # Enable hot reload for development
+        log_level="info",
+    )

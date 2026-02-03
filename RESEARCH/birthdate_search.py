@@ -198,7 +198,9 @@ def evaluate_birthdate(
     """
     try:
         # 1. Получаем натальные позиции для этой даты
-        natal_bodies = get_natal_bodies(birth_date, settings)
+        # Конвертируем date в строку ISO формата (полночь)
+        birth_dt_str = f"{birth_date.isoformat()}T12:00:00"  # Полдень UTC
+        natal_bodies = get_natal_bodies(birth_dt_str, settings)
         
         # 2. Вычисляем транзиты к натальным позициям
         df_transits = calculate_transits_for_dates(

@@ -215,6 +215,12 @@ def train_xgb_model(
         "colsample_bytree": 0.8,
         "tree_method": "hist",
     }
+    
+    # Handle verbose separately to avoid XGBoost warning
+    verbose_fit = True
+    if "verbose" in model_params:
+        verbose_fit = model_params.pop("verbose")
+    
     params.update(model_params)
     
     model = XGBBaseline(
@@ -240,6 +246,7 @@ def tune_threshold(
     X_val: np.ndarray,
     y_val: np.ndarray,
     metric: str = "recall_min",  # CHANGED DEFAULT to recall_min
+    verbose: bool = True,
 ) -> Tuple[float, float]:
     """
     ═══════════════════════════════════════════════════════════════════════════════
@@ -267,6 +274,7 @@ def tune_threshold(
         X_val: Validation features
         y_val: Validation labels
         metric: Metric to optimize (default: 'recall_min')
+        verbose: Print best threshold (default: True)
     
     Returns:
         Tuple of (best_threshold, best_score)
@@ -299,11 +307,11 @@ def tune_threshold(
                 best_score = score
                 best_t = float(t)
     
-    # Выводим результат
-    if metric == "recall_min":
-        print(f"🎯 Best threshold={best_t:.2f}, RECALL_MIN={best_score:.4f}, gap={best_gap:.4f}")
-    else:
-        print(f"🎯 Best threshold={best_t:.2f}, {metric}={best_score:.4f}")
+    if verbose:
+        if metric == "recall_min":
+            print(f"🎯 Best threshold={best_t:.2f}, RECALL_MIN={best_score:.4f}, gap={best_gap:.4f}")
+        else:
+            print(f"🎯 Best threshold={best_t:.2f}, {metric}={best_score:.4f}")
     
     return best_t, best_score
 
