@@ -276,23 +276,26 @@ def evaluate_model_full(
         # ---------------------------------------------------------------------
         if dates is not None and prices is not None:
             # --- Predicted Labels ---
-            ax_pred.set_title("PREDICTED Labels (Green=UP, Red=DOWN)")
-            ax_pred.plot(dates, prices, color='black', linewidth=1, label='Price')
+            title_metrics = f"PREDICTED (R_DN={recall_down:.2f} R_UP={recall_up:.2f} MCC={mcc:.3f} ACC={acc:.3f})"
+            ax_pred.set_title(title_metrics, color='black')
+            # Use BLUE/BLACK for price on white background
+            ax_pred.plot(dates, prices, color='#1f77b4', linewidth=1.5, label='Price')
             
             p_min, p_max = prices.min(), prices.max()
             margin = (p_max - p_min) * 0.05
             fill_min, fill_max = p_min - margin, p_max + margin
             
+            # Standard colors work well on white
             ax_pred.fill_between(dates, fill_min, fill_max, where=(y_pred==1), 
                            color='green', alpha=0.2, label='UP')
             ax_pred.fill_between(dates, fill_min, fill_max, where=(y_pred==0), 
                            color='red', alpha=0.2, label='DOWN')
             ax_pred.set_ylabel("Price")
-            ax_pred.grid(True, alpha=0.3)
+            ax_pred.grid(True, alpha=0.3, color='gray', linestyle=':')
             
             # --- True Labels ---
-            ax_true.set_title("TRUE Labels (Green=UP, Red=DOWN)")
-            ax_true.plot(dates, prices, color='black', linewidth=1, label='Price')
+            ax_true.set_title("TRUE Labels (Green=UP, Red=DOWN)", color='black')
+            ax_true.plot(dates, prices, color='#1f77b4', linewidth=1.5, label='Price')
             
             ax_true.fill_between(dates, fill_min, fill_max, where=(y_true==1), 
                            color='green', alpha=0.2, label='UP')
@@ -300,7 +303,7 @@ def evaluate_model_full(
                            color='red', alpha=0.2, label='DOWN')
             ax_true.set_ylabel("Price")
             ax_true.set_xlabel("Date")
-            ax_true.grid(True, alpha=0.3)
+            ax_true.grid(True, alpha=0.3, color='gray', linestyle=':')
             
         elif dates is not None:
             # Fallback Scatter Plot
@@ -319,7 +322,7 @@ def evaluate_model_full(
             ax_ts.set_title(f"Accuracy: {acc:.3f}")
             plt.setp(ax_ts.get_xticklabels(), rotation=45)
 
-        plt.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
+        plt.suptitle(title, fontsize=14, fontweight='bold', y=0.98, color='black')
         plt.tight_layout()
         plt.show()
 
