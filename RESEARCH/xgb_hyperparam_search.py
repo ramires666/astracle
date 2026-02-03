@@ -60,6 +60,7 @@ from RESEARCH.labeling import create_balanced_labels, gaussian_smooth_centered
 from RESEARCH.astro_engine import (
     init_ephemeris,
     calculate_bodies_for_dates,
+    calculate_bodies_for_dates_multi,  # ← ДОБАВЛЕНО
     calculate_aspects_for_dates,
     calculate_transits_for_dates,
     get_natal_bodies,
@@ -92,12 +93,53 @@ from RESEARCH.visualization import (
 
 print("✓ All RESEARCH modules imported")
 
+# ══════════════════════════════════════════════════════════════════════════════════
+# 🎯 ВЫБЕРИТЕ КОНФИГУРАЦИЮ ЗДЕСЬ!
+# ══════════════════════════════════════════════════════════════════════════════════
+# Эти настройки используются ВЕЗДЕ в ноутбуке:
+# - Создание меток (gauss_window, gauss_std)
+# - Расчёт аспектов (orb_mult)
+# - Выбор координат (coord_mode: geo, helio, both)
+# - Исключение тел (exclude_bodies)
+
+CONFIGS = {
+    "CONFIG_1": {
+        "name": "Old Baseline (geo -Uranus,Pluto)",
+        "coord_mode": "geo",
+        "orb_mult": 0.25,
+        "gauss_window": 201,
+        "gauss_std": 50.0,
+        "exclude_bodies": ["Uranus", "Pluto"],
+        "baseline_r_min": 0.578,
+        "baseline_mcc": 0.159,
+    },
+    "CONFIG_2": {
+        "name": "New Best (both all bodies)",
+        "coord_mode": "both",
+        "orb_mult": 0.15,
+        "gauss_window": 300,
+        "gauss_std": 70.0,
+        "exclude_bodies": None,  # ВСЕ ТЕЛА включены
+        "baseline_r_min": 0.587,
+        "baseline_mcc": 0.182,
+    },
+}
+
+ACTIVE_CONFIG = "CONFIG_2"  # ← ИЗМЕНИТЬ ЗДЕСЬ!
+config = CONFIGS[ACTIVE_CONFIG]
+
+print(f"\n🎯 ACTIVE CONFIG: {ACTIVE_CONFIG}")
+print(f"   {config['name']}")
+print(f"   coord_mode: {config['coord_mode']}, orb: {config['orb_mult']}")
+print(f"   gauss: {config['gauss_window']}/{config['gauss_std']}")
+print(f"   exclude: {config['exclude_bodies']}")
+print(f"   baseline: R_MIN={config['baseline_r_min']}, MCC={config['baseline_mcc']}")
+
 # %%
 # Show configuration
-print(f"Active subject: {cfg.active_subject_id}")
+print(f"\nActive subject: {cfg.active_subject_id}")
 print(f"Data root: {cfg.data_root}")
 print(f"DB URL configured: {bool(cfg.db_url)}")
-print(f"Label config: {cfg.get_label_config()}")
 
 # %% [markdown]
 # ## 2. Load Market Data
@@ -125,15 +167,17 @@ plot_price_distribution(df_market, price_mode="log")
 # ## 4. Create Labels
 
 # %%
-# Configuration for labeling
+# Configuration for labeling - БЕРЁМ ИЗ config!
 LABEL_CONFIG = {
     "horizon": 1,           # Prediction horizon (days)
     "move_share": 0.5,      # Total share of samples to keep
-    "gauss_window": 201,    # Gaussian window for detrending (odd)
-    "gauss_std": 50.0,      # Gaussian std
-    "price_mode": "raw",    # 'raw' or 'log'
+    "gauss_window": config["gauss_window"],  # ← ИЗ CONFIG
+    "gauss_std": config["gauss_std"],        # ← ИЗ CONFIG
+    "price_mode": "raw",
     "label_mode": "balanced_detrended",
 }
+
+print(f"🏷️ Label config: window={LABEL_CONFIG['gauss_window']}, std={LABEL_CONFIG['gauss_std']}")
 
 # Create balanced labels
 df_labels = create_balanced_labels(
@@ -170,47 +214,56 @@ print(f"Bodies: {[b.name for b in settings.bodies]}")
 print(f"Aspects: {[a.name for a in settings.aspects]}")
 
 # %%
-# Calculate body positions for all dates
-# (This is fast - no need to cache)
-df_bodies, bodies_by_date = calculate_bodies_for_dates(
-    df_market["date"],
-    settings,
-    progress=True,
-)
+# Calculate body positions for all dates - ИСПОЛЬЗУЕМ coord_mode из config!
+print(f"\n📍 Расчёт позиций (coord_mode={config['coord_mode']})...")
 
-print(f"\nBodies calculated: {len(df_bodies)} rows")
-df_bodies.head()
+if config["coord_mode"] == "geo":
+    df_bodies, bodies_by_date = calculate_bodies_for_dates(
+        df_market["date"], settings, progress=True
+    )
+else:
+    # both или helio - используем multi версию
+    df_bodies, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
+        df_market["date"], settings, coord_mode=config["coord_mode"], progress=True
+    )
+    bodies_by_date = geo_by_date if geo_by_date else helio_by_date
+
+print(f"✓ Bodies calculated: {len(df_bodies)} rows")
 
 # %%
-# Calculate aspects
-ORB_MULTIPLIER = 0.25  # Best from grid search (tight aspects)
+# Calculate aspects - ИСПОЛЬЗУЕМ orb_mult из config!
+print(f"\n📐 Расчёт аспектов (orb={config['orb_mult']})...")
 
 df_aspects = calculate_aspects_for_dates(
     bodies_by_date,
     settings,
-    orb_mult=ORB_MULTIPLIER,
+    orb_mult=config["orb_mult"],  # ← ИЗ CONFIG
     progress=True,
 )
+print(f"✓ Aspects: {len(df_aspects)} rows")
 
-print(f"\nAspects: {len(df_aspects)} rows")
-df_aspects.head()
+# %%
+# Calculate phases - фазы Луны и элонгации планет
+print("\n🌙 Расчёт фаз Луны и элонгаций...")
+from RESEARCH.astro_engine import calculate_phases_for_dates
+df_phases = calculate_phases_for_dates(bodies_by_date, progress=True)
+print(f"✓ Phases: {len(df_phases)} rows")
 
 # %% [markdown]
 # ## 6. Build Features
 
 # %%
-# Build feature matrix
+# Build feature matrix - ИСПОЛЬЗУЕМ exclude_bodies и df_phases из config!
+print(f"\n🔧 Building features (exclude={config['exclude_bodies']})...")
+
 df_features = build_full_features(
     df_bodies,
     df_aspects,
-    df_transits=None,  # Add transit aspects if needed
-    include_pair_aspects=True,
-    include_transit_aspects=False,
-    exclude_bodies=["Uranus", "Pluto"],  # Best from grid search - these add noise
+    df_phases=df_phases,  # ← ДОБАВЛЯЕМ ФАЗЫ!
+    exclude_bodies=config["exclude_bodies"],  # ← ИЗ CONFIG
 )
 
-print(f"Features shape: {df_features.shape}")
-df_features.head()
+print(f"✓ Features shape: {df_features.shape}")
 
 # %%
 # Merge with labels
@@ -251,14 +304,16 @@ print(f"X_val:   {X_val.shape}, y_val:   {y_val.shape}")
 print(f"X_test:  {X_test.shape}, y_test:  {y_test.shape}")
 
 # %%
-# Train XGBoost model
+# Train XGBoost model with BASELINE params (проверенные в single_body_search)
 MODEL_PARAMS = {
-    "n_estimators": 500,
-    "max_depth": 6,
-    "learning_rate": 0.03,
+    "n_estimators": 300,   # ← Baseline
+    "max_depth": 3,        # ← Baseline (меньше = меньше переобучения)
+    "learning_rate": 0.03, # ← Baseline
     "subsample": 0.8,
     "colsample_bytree": 0.8,
 }
+
+print(f"🌳 Model params: {MODEL_PARAMS}")
 
 model = train_xgb_model(
     X_train, y_train,
@@ -346,36 +401,9 @@ print(f"🖥️ Устройство: {device}")
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
-# 🎛️ КОНФИГУРАЦИИ ДЛЯ ТЕСТИРОВАНИЯ
+#  XGBOOST HYPERPARAMETERS — ЧТО ПЕРЕБИРАЕМ
 # ══════════════════════════════════════════════════════════════════════════════════
-
-# Две лучшие конфигурации астро-параметров
-CONFIGS = {
-    "CONFIG_1": {
-        "name": "Old Baseline (geo -Uranus,Pluto)",
-        "coord_mode": "geo",
-        "orb_mult": 0.25,
-        "gauss_window": 201,
-        "gauss_std": 50.0,
-        "exclude_bodies": ["Uranus", "Pluto"],
-        "baseline_r_min": 0.578,
-        "baseline_mcc": 0.159,
-    },
-    "CONFIG_2": {
-        "name": "New Best (both -Uranus,Pluto)",
-        "coord_mode": "both",
-        "orb_mult": 0.15,
-        "gauss_window": 300,
-        "gauss_std": 70.0,
-        "exclude_bodies": ["Uranus", "Pluto"],
-        "baseline_r_min": 0.587,
-        "baseline_mcc": 0.182,
-    },
-}
-
-# ══════════════════════════════════════════════════════════════════════════════════
-# 🌳 XGBOOST HYPERPARAMETERS — ЧТО ПЕРЕБИРАЕМ
-# ══════════════════════════════════════════════════════════════════════════════════
+# CONFIGS и ACTIVE_CONFIG уже определены в начале файла!
 
 # n_estimators — количество деревьев
 N_ESTIMATORS = [100, 200, 300, 500, 700]
@@ -393,13 +421,7 @@ SUBSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
 COLSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
 
 # early_stopping_rounds — остановка если валидация не улучшается
-# (по умолчанию 50 в XGBBaseline, но можно переопределить)
 EARLY_STOPPING = 50
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Выбор КАКУЮ конфигурацию тестировать (меняйте здесь!)
-# ──────────────────────────────────────────────────────────────────────────────
-ACTIVE_CONFIG = "CONFIG_2"  # ← Изменить на "CONFIG_1" для старого baseline
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Режим перебора: "full" или "fast"
@@ -415,8 +437,6 @@ if SEARCH_MODE == "full":
 else:
     total_combos = len(N_ESTIMATORS) * len(MAX_DEPTHS) * len(LEARNING_RATES)
     param_combos = list(product(N_ESTIMATORS, MAX_DEPTHS, LEARNING_RATES, [0.8], [0.8]))
-
-config = CONFIGS[ACTIVE_CONFIG]
 
 print("=" * 80)
 print("🌳 XGBOOST HYPERPARAMETER SEARCH")
@@ -674,16 +694,27 @@ print("🔍 FULL ANALYSIS WITH BEST HYPERPARAMETERS")
 print("=" * 80)
 
 # Получаем лучшие параметры
-if best_so_far.get("params"):
+# Опция: использовать baseline параметры (проверенные в single_body_search)
+FORCE_BASELINE_PARAMS = True  # ← Установите False чтобы использовать результаты hyperparameter search
+
+BASELINE_XGB_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 3,
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "early_stopping_rounds": 50,
+}
+
+if FORCE_BASELINE_PARAMS:
+    BEST_PARAMS = BASELINE_XGB_PARAMS.copy()
+    print("⚠️ Using BASELINE XGB params (from single_body_search)")
+elif best_so_far.get("params"):
     BEST_PARAMS = best_so_far["params"]
+    print("✓ Using params from hyperparameter search")
 else:
-    BEST_PARAMS = {
-        "n_estimators": 300,
-        "max_depth": 3,
-        "learning_rate": 0.03,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-    }
+    BEST_PARAMS = BASELINE_XGB_PARAMS.copy()
+    print("⚠️ Fallback to BASELINE XGB params")
 
 print(f"\n🌳 Using hyperparameters: {BEST_PARAMS}")
 print(f"🌍 Config: {config['name']}")
