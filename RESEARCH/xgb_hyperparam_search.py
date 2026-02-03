@@ -743,14 +743,19 @@ df_aspects = calculate_aspects_for_dates(
 print(f"   Aspects: {len(df_aspects)} rows")
 
 # %%
-# Строим признаки
+# Вычисляем фазы Луны и элонгации планет (как в grid search!)
+print("\n🌙 Calculating moon phases...")
+from RESEARCH.astro_engine import calculate_phases_for_dates
+df_phases = calculate_phases_for_dates(bodies_by_date_final, progress=True)
+print(f"   Phases: {len(df_phases)} rows")
+
+# %%
+# Строим признаки (с фазами!)
 print("\n🔧 Building features...")
 df_features = build_full_features(
     df_bodies_final,  # ← Используем пересчитанные данные
     df_aspects,
-    df_transits=None,
-    include_pair_aspects=True,
-    include_transit_aspects=False,
+    df_phases=df_phases,  # ← ВАЖНО: добавляем фазы как в grid search!
     exclude_bodies=config["exclude_bodies"],
 )
 print(f"   Features shape: {df_features.shape}")
