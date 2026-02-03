@@ -62,6 +62,7 @@ def evaluate_model_full(
     label_names: List[str] = ["DOWN", "UP"],
     figsize: Tuple[int, int] = (14, 5),
     show_plot: bool = True,
+    prices: Optional[pd.Series] = None,
 ) -> Dict:
     """
     Comprehensive model evaluation with visualizations.

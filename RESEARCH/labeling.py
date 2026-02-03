@@ -72,6 +72,7 @@ def create_balanced_labels(
     gauss_std: Optional[float] = None,
     price_mode: Literal["raw", "log"] = "raw",
     label_mode: Literal["balanced_detrended", "balanced_future_return"] = "balanced_detrended",
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Create balanced binary labels (UP/DOWN) based on future returns.
@@ -145,10 +146,11 @@ def create_balanced_labels(
     n_up_final = (df_labels["target"] == 1).sum()
     n_down_final = (df_labels["target"] == 0).sum()
     
-    print(f"Labels created: {len(df_labels)} samples")
-    print(f"  UP: {n_up_final} ({100*n_up_final/len(df_labels):.1f}%)")
-    print(f"  DOWN: {n_down_final} ({100*n_down_final/len(df_labels):.1f}%)")
-    print(f"  Date range: {df_labels['date'].min().date()} -> {df_labels['date'].max().date()}")
+    if verbose:
+        print(f"Labels created: {len(df_labels)} samples")
+        print(f"  UP: {n_up_final} ({100*n_up_final/len(df_labels):.1f}%)")
+        print(f"  DOWN: {n_down_final} ({100*n_down_final/len(df_labels):.1f}%)")
+        print(f"  Date range: {df_labels['date'].min().date()} -> {df_labels['date'].max().date()}")
     
     return df_labels
 

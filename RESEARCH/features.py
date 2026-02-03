@@ -138,6 +138,7 @@ def build_full_features(
 def merge_features_with_labels(
     df_features: pd.DataFrame,
     df_labels: pd.DataFrame,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Merge features with labels on date (LEFT JOIN + FORWARD-FILL).
@@ -182,8 +183,9 @@ def merge_features_with_labels(
     # Convert target to int
     df_merged["target"] = df_merged["target"].astype(int)
     
-    print(f"Merged dataset: {len(df_merged)} samples (ALL days, forward-filled)")
-    print(f"Features: {len([c for c in df_merged.columns if c not in ['date', 'target']])}")
+    if verbose:
+        print(f"Merged dataset: {len(df_merged)} samples (ALL days, forward-filled)")
+        print(f"Features: {len([c for c in df_merged.columns if c not in ['date', 'target']])}")
     
     return df_merged
 

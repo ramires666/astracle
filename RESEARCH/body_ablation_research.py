@@ -303,6 +303,7 @@ def train_and_evaluate(
         df_market,
         gauss_window=gauss_window,
         gauss_std=gauss_std,
+        verbose=verbose,
     )
     
     # -------------------------------------------------------------------------
@@ -332,7 +333,7 @@ def train_and_evaluate(
     # -------------------------------------------------------------------------
     # STEP 5: Merge features with labels
     # -------------------------------------------------------------------------
-    df_dataset = merge_features_with_labels(df_features, df_labels)
+    df_dataset = merge_features_with_labels(df_features, df_labels, verbose=verbose)
     
     # Need at least 100 samples to train meaningfully
     if len(df_dataset) < 100:
@@ -455,6 +456,35 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     print(f"   Gauss windows: {GRID_PARAMS['gauss_windows']}")
     print(f"   Gauss stds: {GRID_PARAMS['gauss_stds']}")
     print(f"   Body exclusions: {len(ABLATION_BODIES)}")
+
+    # -------------------------------------------------------------------------
+    # Setup Resumable Search
+    # -------------------------------------------------------------------------
+    partial_csv_path = "RESEARCH/reports/grid_search_partial.csv"
+    processed_configs = set()
+    
+    # Load existing results if any
+    if os.path.exists(partial_csv_path):
+        try:
+            partial_df = pd.read_csv(partial_csv_path)
+            # Create a signature string for each row to identify unique configs
+            for _, row in partial_df.iterrows():
+                # Note: exclude_bodies in CSV is a string or NaN
+                excl_val = row['exclude_bodies'] if not pd.isna(row['exclude_bodies']) else "none"
+                config_sig = (
+                    row['coord_mode'], 
+                    row['gauss_window'], 
+                    row['gauss_std'], 
+                    row['orb_mult'], 
+                    str(excl_val)
+                )
+                processed_configs.add(config_sig)
+            print(f"🔄 Found partial results: {len(processed_configs)} configurations already processed.")
+        except Exception as e:
+            print(f"⚠️ Error reading partial results: {e}. Starting fresh.")
+    
+    # Calculate directory and create if not exists
+    os.makedirs(os.path.dirname(partial_csv_path), exist_ok=True)
     
     # -------------------------------------------------------------------------
     # Pre-calculate body positions for each coord mode
@@ -478,12 +508,23 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     print("🚀 STARTING GRID SEARCH")
     print("=" * 70)
     
+    print("=" * 70)
+    
     best_recall_min = -1.0
+    best_info = "None yet"
+    
+    # Initialize batch buffer
+    batch_buffer = []
     
     for i, (coord, gw, gs, orb, excl) in enumerate(combos):
         # Create string representation of excluded bodies
         excl_str = ','.join(excl) if excl else 'none'
         
+        # Check if already processed
+        config_sig = (coord, gw, gs, orb, excl_str)
+        if config_sig in processed_configs:
+            continue
+            
         # Get cached body positions for this coord mode
         df_bodies, geo_by_date, _ = cached_bodies[coord]
         
@@ -501,8 +542,8 @@ def run_full_grid_search(df_market, settings, device='cpu'):
         if result is None:
             continue
         
-        # Store results
-        results.append({
+        # Collect result data
+        row_data = {
             'coord_mode': coord,
             'gauss_window': gw,
             'gauss_std': gs,
@@ -511,23 +552,65 @@ def run_full_grid_search(df_market, settings, device='cpu'):
             'n_features': result['n_features'],
             'recall_min': result['recall_min'],
             'recall_gap': result['recall_gap'],
+            'recall_down': result['recall_down'],
+            'recall_up': result['recall_up'],
             'balanced_accuracy': result['balanced_accuracy'],
             'mcc': result['mcc'],
             'f1_macro': result['f1_macro'],
             'threshold': result['threshold'],
-        })
+        }
         
+        # Add to main results list AND batch buffer
+        results.append(row_data)
+        batch_buffer.append(row_data)
+        
+        # Global best tracking
         if result['recall_min'] > best_recall_min:
             best_recall_min = result['recall_min']
-            print(f"🌟 NEW BEST: R_MIN={best_recall_min:.3f} (MCC={result['mcc']:.3f}) "
-                  f"params: {coord} W={gw} S={gs:.0f} O={orb} excl={excl_str}")
+            best_info = (f"R_MIN={best_recall_min:.3f} GAP={result['recall_gap']:.3f} MCC={result['mcc']:.3f} "
+                         f":: {coord} W={gw} S={gs:.0f} O={orb} excl={excl_str}")
+            print(f"🌟 NEW BEST: {best_info}")
 
-        # Print progress
+        # Print progress with full metrics
         print(f"[{i+1:3d}/{len(combos)}] {coord:5s} W={gw} S={gs:.0f} O={orb} "
-              f"excl={excl_str:20s} → R_MIN={result['recall_min']:.3f} "
-              f"MCC={result['mcc']:.3f}")
+              f"excl={excl_str:20s} → "
+              f"R_DN={result['recall_down']:.2f} R_UP={result['recall_up']:.2f} GAP={result['recall_gap']:.2f} "
+              f"F1={result['f1_macro']:.2f} ACC={result['balanced_accuracy']:.2f} "
+              f"| R_MIN={result['recall_min']:.3f} MCC={result['mcc']:.3f}")
+        
+        # Print best so far every time
+        print(f"   🏆 BEST: {best_info}")
+        
+        # ---------------------------------------------------------------------
+        # Batch Save Logic (Every 50 iterations)
+        # ---------------------------------------------------------------------
+        if len(batch_buffer) >= 50:
+            _save_batch(batch_buffer, partial_csv_path)
+            batch_buffer = []  # Clear buffer
+            
+    # Save any remaining results in buffer
+    if batch_buffer:
+        _save_batch(batch_buffer, partial_csv_path)
+
+    # -------------------------------------------------------------------------
+    # Final cleanup: If we have full results from Resume, we should merge them!
+    # -------------------------------------------------------------------------
+    # If we skipped items, 'results' only contains NEW items.
+    # We should return the FULL set from the CSV for proper final ranking.
+    if os.path.exists(partial_csv_path):
+        final_df = pd.read_csv(partial_csv_path)
+        return final_df
     
     return pd.DataFrame(results)
+
+
+def _save_batch(buffer, path):
+    """Helper to append batch to CSV."""
+    df_batch = pd.DataFrame(buffer)
+    # If file doesn't exist, write header. If exists, skip header.
+    header = not os.path.exists(path)
+    df_batch.to_csv(path, mode='a', header=header, index=False)
+    print(f"💾 Saved batch of {len(buffer)} results to {path}")
 
 
 # %% Main Function
