@@ -469,6 +469,7 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     print("\n" + "=" * 70)
     print("🚀 STARTING GRID SEARCH")
     print("=" * 70)
+    
     best_recall_min = -1.0
     
     for i, (coord, gw, gs, orb, excl) in enumerate(combos):
@@ -512,6 +513,7 @@ def run_full_grid_search(df_market, settings, device='cpu'):
             best_recall_min = result['recall_min']
             print(f"🌟 NEW BEST: R_MIN={best_recall_min:.3f} (MCC={result['mcc']:.3f}) "
                   f"params: {coord} W={gw} S={gs:.0f} O={orb} excl={excl_str}")
+
         # Print progress
         print(f"[{i+1:3d}/{len(combos)}] {coord:5s} W={gw} S={gs:.0f} O={orb} "
               f"excl={excl_str:20s} → R_MIN={result['recall_min']:.3f} "
