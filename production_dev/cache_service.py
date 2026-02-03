@@ -243,29 +243,39 @@ def get_backtest_with_accuracy(
     cutoff_date = datetime.now() - timedelta(days=days)
     df = df[df["date"] >= cutoff_date].copy()
     
-    # Calculate accuracy stats
-    valid_rows = df[df["correct"].notna()].copy()
-    total = len(valid_rows)
-    correct = valid_rows["correct"].sum() if total > 0 else 0
-    accuracy = correct / total if total > 0 else 0
-    
+    # Default stats if 'correct' column doesn't exist
     stats = {
-        "total": int(total),
-        "correct": int(correct),
-        "accuracy": round(float(accuracy), 4),
+        "total": 0,
+        "correct": 0,
+        "accuracy": 0,
         "up_accuracy": 0,
         "down_accuracy": 0,
     }
     
-    # Calculate per-direction accuracy
-    if total > 0:
-        up_preds = valid_rows[valid_rows["direction"] == "UP"]
-        down_preds = valid_rows[valid_rows["direction"] == "DOWN"]
+    # Only calculate accuracy if 'correct' column exists
+    if "correct" in df.columns:
+        valid_rows = df[df["correct"].notna()].copy()
+        total = len(valid_rows)
+        correct = valid_rows["correct"].sum() if total > 0 else 0
+        accuracy = correct / total if total > 0 else 0
         
-        if len(up_preds) > 0:
-            stats["up_accuracy"] = round(up_preds["correct"].mean(), 4)
-        if len(down_preds) > 0:
-            stats["down_accuracy"] = round(down_preds["correct"].mean(), 4)
+        stats = {
+            "total": int(total),
+            "correct": int(correct),
+            "accuracy": round(float(accuracy), 4),
+            "up_accuracy": 0,
+            "down_accuracy": 0,
+        }
+        
+        # Calculate per-direction accuracy
+        if total > 0:
+            up_preds = valid_rows[valid_rows["direction"] == "UP"]
+            down_preds = valid_rows[valid_rows["direction"] == "DOWN"]
+            
+            if len(up_preds) > 0:
+                stats["up_accuracy"] = round(up_preds["correct"].mean(), 4)
+            if len(down_preds) > 0:
+                stats["down_accuracy"] = round(down_preds["correct"].mean(), 4)
     
     return df, stats
 

@@ -52,6 +52,8 @@ const elements = {
     nEstimators: document.getElementById('n-estimators'),
 
     // Controls
+    backtestSlider: document.getElementById('backtest-slider'),
+    backtestValue: document.getElementById('backtest-value'),
     daysSlider: document.getElementById('days-slider'),
     daysValue: document.getElementById('days-value'),
     predictBtn: document.getElementById('predict-btn'),
@@ -106,6 +108,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 // =============================================================================
 
 function setupEventListeners() {
+    // Backtest slider - updates how much history to show
+    elements.backtestSlider.addEventListener('input', (e) => {
+        const days = parseInt(e.target.value);
+        elements.backtestValue.textContent = `${days} days`;
+        state.backtestDays = days;
+
+        // Redraw chart to update background colors
+        if (state.chart) {
+            state.chart.update();
+        }
+    });
+
     // Days slider
     elements.daysSlider.addEventListener('input', (e) => {
         elements.daysValue.textContent = `${e.target.value} days`;
@@ -346,6 +360,79 @@ function showLoading(show) {
 function initializeChart() {
     const ctx = elements.chartCanvas.getContext('2d');
 
+    // Plugin to draw colored vertical regions for predictions
+    const predictionBackgroundPlugin = {
+        id: 'predictionBackground',
+        beforeDraw: (chart) => {
+            const { ctx, chartArea, scales } = chart;
+            if (!chartArea || !scales.x) return;
+
+            const today = new Date().toISOString().split('T')[0];
+
+            // Combine backtest and forecast for background coloring
+            const allPredictions = [
+                ...state.cachedBacktest.slice(-state.backtestDays).map(p => ({ ...p, isPast: true })),
+                ...state.cachedForecast.map(p => ({ ...p, isPast: false })),
+            ];
+
+            if (allPredictions.length === 0) return;
+
+            ctx.save();
+
+            allPredictions.forEach((pred, index) => {
+                const date = pred.date;
+                const x = scales.x.getPixelForValue(date);
+
+                // Calculate width for each day region
+                const nextDate = allPredictions[index + 1]?.date;
+                const nextX = nextDate ? scales.x.getPixelForValue(nextDate) : x + 5;
+                const width = Math.max(nextX - x, 2);
+
+                // Skip if outside chart area
+                if (x < chartArea.left - width || x > chartArea.right + width) return;
+
+                // Colors based on direction and past/future
+                let color;
+                if (pred.direction === 'UP') {
+                    // Green - darker for past, lighter for future
+                    color = pred.isPast
+                        ? 'rgba(34, 197, 94, 0.15)'   // Dark green (past)
+                        : 'rgba(134, 239, 172, 0.12)'; // Light green (future)
+                } else if (pred.direction === 'DOWN') {
+                    // Red - darker for past, lighter for future
+                    color = pred.isPast
+                        ? 'rgba(239, 68, 68, 0.15)'   // Dark red (past)
+                        : 'rgba(252, 165, 165, 0.12)'; // Light red (future)
+                } else {
+                    color = 'rgba(150, 150, 150, 0.05)'; // Gray for unknown
+                }
+
+                ctx.fillStyle = color;
+                ctx.fillRect(
+                    Math.max(x, chartArea.left),
+                    chartArea.top,
+                    Math.min(width, chartArea.right - x),
+                    chartArea.bottom - chartArea.top
+                );
+            });
+
+            // Draw vertical line for today
+            const todayX = scales.x.getPixelForValue(today);
+            if (todayX >= chartArea.left && todayX <= chartArea.right) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(todayX, chartArea.top);
+                ctx.lineTo(todayX, chartArea.bottom);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            ctx.restore();
+        }
+    };
+
     // Prepare historical data for chart
     const historicalData = state.historicalPrices.map(hp => ({
         x: hp.date,
@@ -379,53 +466,37 @@ function initializeChart() {
         type: 'line',
         data: {
             datasets: [
-                // Backtest: Past predictions with accuracy colors
-                {
-                    label: 'Backtest (Past Predictions)',
-                    data: backtestData,
-                    borderColor: 'rgba(150, 150, 180, 0.4)',
-                    backgroundColor: 'rgba(100, 100, 150, 0.05)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 4,
-                    pointHoverRadius: 8,
-                    pointBackgroundColor: backtestPointColors,
-                    pointBorderColor: backtestBorderColors,
-                    pointBorderWidth: 2,
-                    borderWidth: 1,
-                    order: 2,  // Draw behind
-                },
                 // Historical actual prices
                 {
                     label: 'Actual Price',
                     data: historicalData,
-                    borderColor: 'rgba(255, 255, 255, 0.6)',
+                    borderColor: 'rgba(255, 255, 255, 0.8)',
                     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                    fill: true,
-                    tension: 0.3,
+                    fill: false,
+                    tension: 0.2,
                     pointRadius: 0,
-                    pointHoverRadius: 6,
+                    pointHoverRadius: 4,
                     borderWidth: 2,
                     order: 1,
                 },
-                // Predicted future prices
+                // Predicted future prices (from cache or API)
                 {
                     label: 'Forecast',
-                    data: cachedForecastData,  // Start with cached, can be overwritten
+                    data: cachedForecastData,
                     borderColor: '#f7b731',
-                    backgroundColor: 'rgba(247, 183, 49, 0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 3,
-                    pointHoverRadius: 8,
-                    borderWidth: 2.5,
-                    order: 0,  // Draw on top
+                    backgroundColor: 'rgba(247, 183, 49, 0.05)',
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 0,  // No circles!
+                    pointHoverRadius: 4,
+                    borderWidth: 2,
+                    order: 0,
                     segment: {
                         borderColor: ctx => {
-                            // Color based on prediction direction
+                            // Color line based on prediction direction
                             const forecast = state.cachedForecast[ctx.p0DataIndex] || state.predictions[ctx.p0DataIndex];
                             if (forecast) {
-                                return forecast.direction === 'UP' ? '#00d4aa' : '#ff6b6b';
+                                return forecast.direction === 'UP' ? '#22c55e' : '#ef4444';
                             }
                             return '#f7b731';
                         },
@@ -521,6 +592,7 @@ function initializeChart() {
                 },
             },
         },
+        plugins: [predictionBackgroundPlugin],  // Register our custom plugin
     });
 
     // Hide loading
