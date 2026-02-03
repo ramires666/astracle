@@ -257,6 +257,7 @@ def run_grid_search(
     df_market: pd.DataFrame,
     config: Optional[GridSearchConfig] = None,
     save_results: bool = True,
+    n_workers: int = 1,  # NEW: Number of parallel workers (1 = sequential)
 ) -> pd.DataFrame:
     """
     ═══════════════════════════════════════════════════════════════════════════════
@@ -277,12 +278,23 @@ def run_grid_search(
     5. Сохраняем результат
     
     В конце сортируем по качеству (recall_min) и балансу (recall_gap).
+    
+    MULTIPROCESSING:
+    ─────────────────────────────────────────────────────────────────────────────
+    n_workers=1  — последовательное выполнение (по умолчанию)
+    n_workers=4  — параллельно на 4 ядрах
+    n_workers=-1 — все доступные ядра
+    
+    ⚠️ ВНИМАНИЕ: XGBoost сам использует многопоточность!
+    Если у вас GPU, лучше n_workers=1 (GPU и так быстро).
+    Если CPU, попробуйте n_workers=2-4.
     ═══════════════════════════════════════════════════════════════════════════════
     
     Args:
         df_market: Market data DataFrame
         config: GridSearchConfig (uses defaults if None)
         save_results: Save results to reports directory
+        n_workers: Number of parallel workers (1=sequential, -1=all cores)
     
     Returns:
         DataFrame with all results sorted by balance
@@ -405,17 +417,19 @@ def run_grid_search(
         "metrics": {}
     }
 
-    for i, (coord_mode, orb, gw, gs, excl) in enumerate(combos):
-        # Format params compactly
+    # ─────────────────────────────────────────────────────────────────────────────
+    # WORKER FUNCTION для параллельного выполнения
+    # ─────────────────────────────────────────────────────────────────────────────
+    def _evaluate_one_combo(combo_data):
+        """Evaluate single combo - used for parallel execution."""
+        idx, coord_mode, orb, gw, gs, excl = combo_data
+        
         excl_str = f"-[{len(excl)}]" if excl else ""
         if excl and len(excl) <= 2:
             excl_str = f"-[{','.join(excl)}]"
-            
-        params_str = f"[{i+1}/{len(combos)}] {coord_mode} | O={orb} W={gw} S={gs} {excl_str}"
-        # print(f"{params_str:<60}", end=" ")  # OLD: Removed to avoid partial print
+        params_str = f"[{idx+1}/{len(combos)}] {coord_mode} | O={orb} W={gw} S={gs} {excl_str}"
         
         try:
-            # Получаем закэшированные данные для этого coord_mode
             df_bodies, geo_by_date, helio_by_date = cached_bodies[coord_mode]
             bodies_by_date = geo_by_date if geo_by_date else helio_by_date
             
@@ -423,63 +437,138 @@ def run_grid_search(
                 df_market, df_bodies, bodies_by_date, settings,
                 orb, gw, gs,
                 exclude_bodies=excl if excl else None,
-                angles_cache=cached_angles.get(coord_mode),  # NEW: используем кэш углов!
+                angles_cache=cached_angles.get(coord_mode),
                 device=device,
                 model_params=config.model_params,
             )
             res["coord_mode"] = coord_mode
-            results.append(res)
-            
-            if "error" not in res:
-                r_min = res['recall_min']
-                r_gap = res['recall_gap']
-                mcc = res.get('mcc', 0)
-                
-                # Check directly if this is best
-                is_best = False
-                if r_min > best_so_far["score"]:
-                    is_best = True
-                elif r_min == best_so_far["score"] and r_gap < best_so_far["gap"]:
-                    is_best = True
-                    
-                if is_best:
-                    best_so_far["score"] = r_min
-                    best_so_far["gap"] = r_gap
-                    best_so_far["combo"] = f"{coord_mode} O={orb} W={gw} S={gs} {excl_str}"
-                    best_so_far["metrics"] = f"R_MIN={r_min:.3f} GAP={r_gap:.3f} MCC={mcc:.3f}"
-                
-                # ATOMIC PRINT
-                msg = f"{params_str:<60} → R_UP={res['recall_up']:.3f} R_DOWN={res['recall_down']:.3f} MCC={mcc:.3f}"
-                print(msg)
-                print(f"   🏆 BEST: {best_so_far['metrics']} ({best_so_far['combo']})")
-                print()  # Пустая строка разделитель
-            else:
-                print(f"{params_str:<60} → ERROR: {res.get('error')}")
-
-            # ─────────────────────────────────────────────────────────────────────────────
-            # CHECKPOINT: Save every 100 iterations
-            # ─────────────────────────────────────────────────────────────────────────────
-            if (i + 1) % 100 == 0:
-                try:
-                    ckpt_dir = cfg.reports_dir / "checkpoints"
-                    ckpt_dir.mkdir(exist_ok=True, parents=True)
-                    
-                    ckpt_path = ckpt_dir / f"grid_search_{run_timestamp}_checkpoint.parquet"
-                    
-                    # Convert to DF and save
-                    # Note: Convert columns with complex types (lists) to string if parquet fails?
-                    # Parquet handles lists usually.
-                    pd.DataFrame(results).to_parquet(ckpt_path, index=False)
-                    print(f"   💾 Checkpoint saved: {ckpt_path.name}")
-                except Exception as e:
-                    print(f"   ⚠️ Checkpoint error: {e}")
-
+            return idx, params_str, excl_str, res, None
         except Exception as e:
-            print(f"{params_str:<60} → CRASH: {e}")
-            results.append({
-                "coord_mode": coord_mode, "orb_mult": orb, "gauss_window": gw, "gauss_std": gs,
-                "exclude_bodies": excl, "error": str(e)
-            })
+            return idx, params_str, excl_str, {
+                "coord_mode": coord_mode, "orb_mult": orb, "gauss_window": gw, 
+                "gauss_std": gs, "exclude_bodies": excl, "error": str(e)
+            }, str(e)
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # PARALLEL or SEQUENTIAL execution
+    # ─────────────────────────────────────────────────────────────────────────────
+    combo_data_list = [(i, *combo) for i, combo in enumerate(combos)]
+    
+    if n_workers > 1 or n_workers == -1:
+        # PARALLEL EXECUTION with ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import os
+        
+        actual_workers = n_workers if n_workers > 0 else os.cpu_count() or 4
+        print(f"\n⚡ ПАРАЛЛЕЛЬНОЕ ВЫПОЛНЕНИЕ: {actual_workers} потоков")
+        
+        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            futures = {executor.submit(_evaluate_one_combo, cd): cd for cd in combo_data_list}
+            
+            for future in as_completed(futures):
+                idx, params_str, excl_str, res, error = future.result()
+                results.append(res)
+                
+                if error is None and "error" not in res:
+                    r_min = res['recall_min']
+                    r_gap = res['recall_gap']
+                    mcc = res.get('mcc', 0)
+                    coord_mode = res.get('coord_mode', '?')
+                    orb = res.get('orb_mult', 0)
+                    gw = res.get('gauss_window', 0)
+                    gs = res.get('gauss_std', 0)
+                    
+                    is_best = r_min > best_so_far["score"] or (
+                        r_min == best_so_far["score"] and r_gap < best_so_far["gap"]
+                    )
+                    if is_best:
+                        best_so_far["score"] = r_min
+                        best_so_far["gap"] = r_gap
+                        best_so_far["combo"] = f"{coord_mode} O={orb} W={gw} S={gs} {excl_str}"
+                        best_so_far["metrics"] = f"R_MIN={r_min:.3f} GAP={r_gap:.3f} MCC={mcc:.3f}"
+                    
+                    msg = f"{params_str:<60} → R_UP={res['recall_up']:.3f} R_DOWN={res['recall_down']:.3f} MCC={mcc:.3f}"
+                    print(msg)
+                    print(f"   🏆 BEST: {best_so_far['metrics']} ({best_so_far['combo']})")
+                    print()
+                else:
+                    print(f"{params_str:<60} → ERROR: {error or res.get('error')}")
+                
+                # Checkpoint every 100
+                if len(results) % 100 == 0:
+                    try:
+                        ckpt_dir = cfg.reports_dir / "checkpoints"
+                        ckpt_dir.mkdir(exist_ok=True, parents=True)
+                        ckpt_path = ckpt_dir / f"grid_search_{run_timestamp}_checkpoint.parquet"
+                        pd.DataFrame(results).to_parquet(ckpt_path, index=False)
+                        print(f"   💾 Checkpoint: {len(results)} combos saved")
+                    except Exception as e:
+                        print(f"   ⚠️ Checkpoint error: {e}")
+    else:
+        # SEQUENTIAL EXECUTION (original behavior)
+        for i, (coord_mode, orb, gw, gs, excl) in enumerate(combos):
+            excl_str = f"-[{len(excl)}]" if excl else ""
+            if excl and len(excl) <= 2:
+                excl_str = f"-[{','.join(excl)}]"
+                
+            params_str = f"[{i+1}/{len(combos)}] {coord_mode} | O={orb} W={gw} S={gs} {excl_str}"
+            
+            try:
+                df_bodies, geo_by_date, helio_by_date = cached_bodies[coord_mode]
+                bodies_by_date = geo_by_date if geo_by_date else helio_by_date
+                
+                res = evaluate_combo(
+                    df_market, df_bodies, bodies_by_date, settings,
+                    orb, gw, gs,
+                    exclude_bodies=excl if excl else None,
+                    angles_cache=cached_angles.get(coord_mode),
+                    device=device,
+                    model_params=config.model_params,
+                )
+                res["coord_mode"] = coord_mode
+                results.append(res)
+                
+                if "error" not in res:
+                    r_min = res['recall_min']
+                    r_gap = res['recall_gap']
+                    mcc = res.get('mcc', 0)
+                    
+                    is_best = False
+                    if r_min > best_so_far["score"]:
+                        is_best = True
+                    elif r_min == best_so_far["score"] and r_gap < best_so_far["gap"]:
+                        is_best = True
+                        
+                    if is_best:
+                        best_so_far["score"] = r_min
+                        best_so_far["gap"] = r_gap
+                        best_so_far["combo"] = f"{coord_mode} O={orb} W={gw} S={gs} {excl_str}"
+                        best_so_far["metrics"] = f"R_MIN={r_min:.3f} GAP={r_gap:.3f} MCC={mcc:.3f}"
+                    
+                    msg = f"{params_str:<60} → R_UP={res['recall_up']:.3f} R_DOWN={res['recall_down']:.3f} MCC={mcc:.3f}"
+                    print(msg)
+                    print(f"   🏆 BEST: {best_so_far['metrics']} ({best_so_far['combo']})")
+                    print()
+                else:
+                    print(f"{params_str:<60} → ERROR: {res.get('error')}")
+
+                # CHECKPOINT: Save every 100 iterations
+                if (i + 1) % 100 == 0:
+                    try:
+                        ckpt_dir = cfg.reports_dir / "checkpoints"
+                        ckpt_dir.mkdir(exist_ok=True, parents=True)
+                        ckpt_path = ckpt_dir / f"grid_search_{run_timestamp}_checkpoint.parquet"
+                        pd.DataFrame(results).to_parquet(ckpt_path, index=False)
+                        print(f"   💾 Checkpoint saved: {ckpt_path.name}")
+                    except Exception as e:
+                        print(f"   ⚠️ Checkpoint error: {e}")
+
+            except Exception as e:
+                print(f"{params_str:<60} → CRASH: {e}")
+                results.append({
+                    "coord_mode": coord_mode, "orb_mult": orb, "gauss_window": gw, "gauss_std": gs,
+                    "exclude_bodies": excl, "error": str(e)
+                })
     
     # Convert to DataFrame
     results_df = pd.DataFrame(results)

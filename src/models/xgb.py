@@ -34,11 +34,13 @@ class XGBBaseline:
         n_classes: int = 3,
         device: str = "cpu",
         random_state: int = 42,
+        early_stopping_rounds: Optional[int] = 50,  # NEW: Early stopping
         **kwargs,
     ):
         self.n_classes = n_classes
         self.device = device
         self.random_state = random_state
+        self.early_stopping_rounds = early_stopping_rounds
         self.feature_names: List[str] = []
         self.best_params: Dict[str, Any] = {}
 
@@ -53,6 +55,11 @@ class XGBBaseline:
             "device": device,
             "random_state": random_state,
         }
+        
+        # XGBoost 2.0+: early_stopping_rounds goes in constructor
+        if early_stopping_rounds is not None and early_stopping_rounds > 0:
+            params["early_stopping_rounds"] = early_stopping_rounds
+        
         if n_classes > 2 and "objective" not in kwargs:
             params["objective"] = "multi:softprob"
             params["num_class"] = n_classes
@@ -75,6 +82,8 @@ class XGBBaseline:
     ) -> None:
         """
         Train the model.
+        
+        Note: early_stopping_rounds is configured in __init__ (XGBoost 2.0+ API).
         """
         self.constant_class = None
 
@@ -101,6 +110,7 @@ class XGBBaseline:
         if X_val_scaled is not None and y_val is not None:
             eval_set = [(X_val_scaled, y_val)]
             eval_weights = [sample_weight_val] if sample_weight_val is not None else None
+            
             self.model.fit(
                 X_train_scaled,
                 y_train,
