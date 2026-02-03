@@ -224,10 +224,10 @@ async def get_historical_data(days: int = 30):
     initial data collection (RESEARCH.data_loader).
     
     Args:
-        days: Number of historical days to load (1-365, default: 30)
+        days: Number of historical days to load (1-730, default: 30)
     """
-    if days < 1 or days > 365:
-        raise HTTPException(status_code=400, detail="Days must be between 1 and 365")
+    if days < 1 or days > 730:
+        raise HTTPException(status_code=400, detail="Days must be between 1 and 730")
     
     try:
         from production_dev.data_service import load_historical_prices, get_data_summary

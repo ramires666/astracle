@@ -202,6 +202,7 @@ class BtcAstroPredictor:
         Generate a pseudo-random price path based on predictions.
         
         Uses random walk with drift, where:
+        - Drift strength is determined by confidence (50% = sideways, 100% = max move)
         - Drift direction is determined by model prediction (UP/DOWN)
         - Volatility is based on historical BTC volatility
         
@@ -227,13 +228,25 @@ class BtcAstroPredictor:
         prices = [start_price]
         
         for pred in predictions:
-            # Drift based on prediction direction
-            # UP predictions have positive drift, DOWN have negative
-            direction = pred["direction_code"]
-            drift = 0.002 if direction == 1 else -0.002  # ~0.2% daily drift
+            # Get confidence (0.5 = neutral, 1.0 = max certainty)
+            confidence = pred.get("confidence", 0.5)
             
-            # Random component
-            random_return = np.random.normal(drift, volatility)
+            # Calculate confidence strength (0 when conf=0.5, 1 when conf=1.0)
+            # This maps [0.5, 1.0] to [0, 1]
+            confidence_strength = max(0, (confidence - 0.5) * 2)
+            
+            # Direction: +1 for UP, -1 for DOWN
+            direction = pred["direction_code"]
+            
+            # Drift scaled by confidence strength
+            # Max drift ~0.5% when confidence=100%, 0% when confidence=50%
+            max_drift = 0.005  # 0.5% max daily directional move
+            drift = direction * max_drift * confidence_strength
+            
+            # Random component - smaller when confidence is high
+            # High confidence = more predictable movement
+            noise_factor = 1.0 - (confidence_strength * 0.7)  # Reduce noise up to 70%
+            random_return = np.random.normal(drift, volatility * noise_factor)
             
             # Calculate new price
             new_price = prices[-1] * (1 + random_return)

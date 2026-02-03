@@ -14,7 +14,7 @@
 const CONFIG = {
     API_BASE: '',  // Same origin
     COINGECKO_API: 'https://api.coingecko.com/api/v3',
-    HISTORICAL_DAYS: 30,  // Days of historical data to show
+    HISTORICAL_DAYS: 400,  // Load enough history to cover full backtest (1 year+)
     DEFAULT_FORECAST_DAYS: 90,
     CHART_ANIMATION_DURATION: 800,
 };
@@ -252,7 +252,8 @@ function updateAccuracyDisplay(stats) {
 }
 
 /**
- * Generate forecast predictions from our API.
+ * Generate forecast using cached predictions.
+ * Uses deterministic price simulation based on confidence.
  */
 async function generateForecast(days) {
     if (state.isLoading) return;
@@ -262,26 +263,72 @@ async function generateForecast(days) {
     elements.predictBtn.disabled = true;
 
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/api/predict?days=${days}`);
+        // Use cached forecast if available
+        if (state.cachedForecast && state.cachedForecast.length > 0) {
+            // Slice to requested number of days
+            const forecastSlice = state.cachedForecast.slice(0, days);
 
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
+            // Recalculate simulated prices starting from last known price
+            const lastPrice = state.historicalPrices.length > 0
+                ? state.historicalPrices[state.historicalPrices.length - 1].price
+                : 78000;
+
+            // Deterministic price simulation based on confidence
+            let price = lastPrice;
+            state.predictions = forecastSlice.map(pred => {
+                // Confidence determines move strength (50% = no move, 60% = ~2% move)
+                const confidence = pred.confidence || 0.5;
+                const confidenceStrength = Math.max(0, (confidence - 0.5) * 2);  // 0 to 1
+
+                // Max daily move ~2%, scaled by confidence  
+                const movePercent = 0.02 * confidenceStrength;
+                const direction = pred.direction === 'UP' ? 1 : -1;
+
+                // Apply move (UP = positive, DOWN = negative)
+                price = price * (1 + direction * movePercent);
+
+                return {
+                    date: pred.date,
+                    direction: pred.direction,
+                    confidence: pred.confidence,
+                    simulated_price: Math.round(price * 100) / 100,
+                };
+            });
+
+            console.log(`🔮 Using cached forecast: ${state.predictions.length} days`);
+        } else {
+            // Fallback to API if no cache
+            const response = await fetch(`${CONFIG.API_BASE}/api/predict?days=${days}`);
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            const data = await response.json();
+            state.predictions = data.predictions;
         }
 
-        const data = await response.json();
+        // Calculate summary
+        const upDays = state.predictions.filter(p => p.direction === 'UP').length;
+        const downDays = state.predictions.filter(p => p.direction === 'DOWN').length;
+        const avgConf = state.predictions.reduce((sum, p) => sum + (p.confidence || 0.5), 0) / state.predictions.length;
+        const startPrice = state.predictions[0]?.simulated_price || 0;
+        const endPrice = state.predictions[state.predictions.length - 1]?.simulated_price || 0;
+        const priceChange = startPrice > 0 ? ((endPrice - startPrice) / startPrice * 100) : 0;
 
-        state.predictions = data.predictions;
+        const summary = {
+            up_days: upDays,
+            down_days: downDays,
+            avg_confidence: avgConf,
+            price_change_percent: priceChange,
+        };
 
         // Update all UI components
         updateChart();
-        updateSummary(data.summary);
-        updateTable(data.predictions);
+        updateSummary(summary);
+        updateTable(state.predictions);
 
         // Show summary and table sections
         elements.summarySection.style.display = 'grid';
         elements.tableSection.style.display = 'block';
 
-        console.log(`🔮 Generated ${data.predictions.length} day forecast`);
+        console.log(`🔮 Generated ${state.predictions.length} day forecast`);
 
     } catch (error) {
         console.error('Forecast generation failed:', error);
@@ -391,20 +438,19 @@ function initializeChart() {
                 // Skip if outside chart area
                 if (x < chartArea.left - width || x > chartArea.right + width) return;
 
-                // Colors based on direction and past/future
+                // Solid background colors like matplotlib
+                // Past = more saturated, Future = lighter
                 let color;
                 if (pred.direction === 'UP') {
-                    // Green - darker for past, lighter for future
                     color = pred.isPast
-                        ? 'rgba(34, 197, 94, 0.15)'   // Dark green (past)
-                        : 'rgba(134, 239, 172, 0.12)'; // Light green (future)
+                        ? 'rgba(134, 239, 172, 0.35)'  // Saturated green (past)
+                        : 'rgba(187, 247, 208, 0.25)'; // Light green (future)
                 } else if (pred.direction === 'DOWN') {
-                    // Red - darker for past, lighter for future
                     color = pred.isPast
-                        ? 'rgba(239, 68, 68, 0.15)'   // Dark red (past)
-                        : 'rgba(252, 165, 165, 0.12)'; // Light red (future)
+                        ? 'rgba(252, 165, 165, 0.35)'  // Saturated red/pink (past)
+                        : 'rgba(254, 202, 202, 0.25)'; // Light red/pink (future)
                 } else {
-                    color = 'rgba(150, 150, 150, 0.05)'; // Gray for unknown
+                    color = 'rgba(150, 150, 150, 0.1)'; // Gray for unknown
                 }
 
                 ctx.fillStyle = color;
@@ -419,7 +465,7 @@ function initializeChart() {
             // Draw vertical line for today
             const todayX = scales.x.getPixelForValue(today);
             if (todayX >= chartArea.left && todayX <= chartArea.right) {
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([5, 5]);
                 ctx.beginPath();
@@ -427,6 +473,11 @@ function initializeChart() {
                 ctx.lineTo(todayX, chartArea.bottom);
                 ctx.stroke();
                 ctx.setLineDash([]);
+
+                // Label "Today"
+                ctx.font = '11px Inter, sans-serif';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.fillText('Today', todayX + 5, chartArea.top + 15);
             }
 
             ctx.restore();
@@ -438,23 +489,6 @@ function initializeChart() {
         x: hp.date,
         y: hp.price,
     }));
-
-    // Prepare backtest data (past predictions with actual prices)
-    const backtestData = state.cachedBacktest.map(bt => ({
-        x: bt.date,
-        y: bt.actual_price || 0,
-    })).filter(d => d.y > 0);
-
-    // Colors for backtest points based on accuracy
-    const backtestPointColors = state.cachedBacktest.map(bt => {
-        if (bt.correct === null || bt.correct === undefined) return 'rgba(150, 150, 150, 0.5)';
-        return bt.correct ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)';  // Green or Red
-    });
-
-    const backtestBorderColors = state.cachedBacktest.map(bt => {
-        if (bt.correct === null || bt.correct === undefined) return 'rgba(150, 150, 150, 0.8)';
-        return bt.correct ? '#22c55e' : '#ef4444';  // Green or Red
-    });
 
     // Prepare forecast data from cache
     const cachedForecastData = state.cachedForecast.map(f => ({
@@ -493,7 +527,8 @@ function initializeChart() {
                     order: 0,
                     segment: {
                         borderColor: ctx => {
-                            // Color line based on prediction direction
+                            // Color based on prediction direction
+                            // (simulation moves in prediction direction, so colors will match)
                             const forecast = state.cachedForecast[ctx.p0DataIndex] || state.predictions[ctx.p0DataIndex];
                             if (forecast) {
                                 return forecast.direction === 'UP' ? '#22c55e' : '#ef4444';
