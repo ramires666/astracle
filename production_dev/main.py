@@ -289,19 +289,29 @@ async def get_full_cached_predictions():
 async def startup_event():
     """
     Application startup handler.
-    Pre-loads the model for faster first request.
+    Pre-loads the model and prediction cache for instant responses.
     """
     print(f"🚀 Starting {APP_CONFIG['title']} v{APP_CONFIG['version']}")
     print(f"📡 API available at http://localhost:{APP_CONFIG['port']}")
     print(f"📊 Web UI available at http://localhost:{APP_CONFIG['port']}/")
     
-    # Optionally pre-load model
+    # Pre-load model
     try:
         get_predictor()
         print("✅ Model loaded successfully")
     except Exception as e:
         print(f"⚠️ Model not loaded: {e}")
         print("   Model will be loaded on first prediction request")
+    
+    # Pre-load prediction cache into memory (for instant /api/predictions/full responses)
+    try:
+        from production_dev.cache_service import init_memory_cache
+        if init_memory_cache():
+            print("✅ Prediction cache loaded into memory")
+        else:
+            print("⚠️ Prediction cache not available. Run: python -m production_dev.generate_cache")
+    except Exception as e:
+        print(f"⚠️ Cache not loaded: {e}")
 
 
 @app.on_event("shutdown")

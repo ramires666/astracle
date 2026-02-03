@@ -32,6 +32,7 @@ let state = {
     accuracyStats: null,     // Backtest accuracy statistics
     isLoading: false,
     modelInfo: null,
+    backtestDays: 180,       // How many backtest days to show (controlled by slider)
 };
 
 // =============================================================================

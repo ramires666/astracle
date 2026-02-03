@@ -32,8 +32,77 @@ CACHE_FILES = {
 }
 
 # Time ranges
-BACKTEST_DAYS = 180   # ~6 months of past predictions
+BACKTEST_DAYS = 365   # 1 year of past predictions
 FORECAST_DAYS = 365   # 1 year of future predictions
+
+
+# =============================================================================
+# IN-MEMORY CACHE (loaded from parquet on startup)
+# =============================================================================
+
+class MemoryCache:
+    """
+    In-memory cache for instant response.
+    Loaded from parquet files on startup, updated when new predictions are generated.
+    """
+    
+    def __init__(self):
+        self.backtest_data: List[Dict] = []
+        self.forecast_data: List[Dict] = []
+        self.accuracy_stats: Dict = {"accuracy": 0, "total": 0, "correct": 0}
+        self.is_loaded: bool = False
+        self.last_loaded: Optional[datetime] = None
+    
+    def load_from_parquet(self) -> bool:
+        """Load cache from parquet files into memory."""
+        try:
+            # Load backtest
+            backtest_df, self.accuracy_stats = get_backtest_with_accuracy_from_file()
+            if backtest_df is not None and len(backtest_df) > 0:
+                self.backtest_data = df_to_backtest_list(backtest_df)
+            
+            # Load forecast
+            forecast_df = load_cached_predictions("forecast")
+            if forecast_df is not None and len(forecast_df) > 0:
+                self.forecast_data = df_to_forecast_list(forecast_df)
+            
+            self.is_loaded = True
+            self.last_loaded = datetime.now()
+            
+            print(f"📦 Memory cache loaded: {len(self.backtest_data)} backtest, {len(self.forecast_data)} forecast")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Failed to load memory cache: {e}")
+            return False
+    
+    def get_all(self) -> Dict:
+        """Get all cached data (instant response)."""
+        return {
+            "backtest": self.backtest_data,
+            "forecast": self.forecast_data,
+            "accuracy": self.accuracy_stats,
+            "cache_info": {
+                "backtest_count": len(self.backtest_data),
+                "forecast_count": len(self.forecast_data),
+                "last_updated": self.last_loaded.isoformat() if self.last_loaded else None,
+                "is_loaded": self.is_loaded,
+            }
+        }
+
+
+# Global in-memory cache instance
+_memory_cache = MemoryCache()
+
+
+def get_memory_cache() -> MemoryCache:
+    """Get the global memory cache instance."""
+    return _memory_cache
+
+
+def init_memory_cache() -> bool:
+    """Initialize memory cache from parquet files. Call on server startup."""
+    return _memory_cache.load_from_parquet()
 
 
 # =============================================================================
@@ -201,41 +270,74 @@ def get_backtest_with_accuracy(
     return df, stats
 
 
+# Alias for use by MemoryCache
+get_backtest_with_accuracy_from_file = get_backtest_with_accuracy
+
+
+def df_to_backtest_list(df: pd.DataFrame) -> List[Dict]:
+    """Convert backtest DataFrame to list of dicts for JSON."""
+    data = []
+    for _, row in df.iterrows():
+        item = {
+            "date": row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], 'strftime') else str(row["date"]),
+            "direction": row["direction"],
+            "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
+        }
+        # Optional columns (may not exist if actual prices weren't merged)
+        if "actual_price" in row.index:
+            item["actual_price"] = float(row["actual_price"]) if pd.notna(row["actual_price"]) else None
+        else:
+            item["actual_price"] = None
+        if "actual_direction" in row.index:
+            item["actual_direction"] = row["actual_direction"] if pd.notna(row.get("actual_direction")) else None
+        else:
+            item["actual_direction"] = None
+        if "correct" in row.index:
+            item["correct"] = bool(row["correct"]) if pd.notna(row["correct"]) else None
+        else:
+            item["correct"] = None
+        data.append(item)
+    return data
+
+
+def df_to_forecast_list(df: pd.DataFrame) -> List[Dict]:
+    """Convert forecast DataFrame to list of dicts for JSON."""
+    data = []
+    for _, row in df.iterrows():
+        data.append({
+            "date": row["date"].strftime("%Y-%m-%d") if hasattr(row["date"], 'strftime') else str(row["date"]),
+            "direction": row["direction"],
+            "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
+            "simulated_price": float(row.get("simulated_price", 0)),
+        })
+    return data
+
+
 def get_full_predictions() -> Dict:
     """
     Get all cached predictions (backtest + forecast) for the frontend.
     
+    Uses in-memory cache for instant response. Falls back to file loading
+    if memory cache is not initialized.
+    
     Returns:
         Dictionary with backtest, forecast, and accuracy stats
     """
+    # Try memory cache first (instant response)
+    cache = get_memory_cache()
+    if cache.is_loaded:
+        return cache.get_all()
+    
+    # Fall back to loading from files (slower)
+    print("⚠️ Memory cache not loaded, falling back to file-based loading")
+    
     # Load backtest
     backtest_df, accuracy_stats = get_backtest_with_accuracy()
+    backtest_data = df_to_backtest_list(backtest_df) if len(backtest_df) > 0 else []
     
     # Load forecast
     forecast_df = load_cached_predictions("forecast")
-    
-    # Convert to JSON-serializable format
-    backtest_data = []
-    if backtest_df is not None and len(backtest_df) > 0:
-        for _, row in backtest_df.iterrows():
-            backtest_data.append({
-                "date": row["date"].strftime("%Y-%m-%d"),
-                "direction": row["direction"],
-                "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
-                "actual_price": float(row["actual_price"]) if pd.notna(row.get("actual_price")) else None,
-                "actual_direction": row.get("actual_direction"),
-                "correct": bool(row["correct"]) if pd.notna(row.get("correct")) else None,
-            })
-    
-    forecast_data = []
-    if forecast_df is not None and len(forecast_df) > 0:
-        for _, row in forecast_df.iterrows():
-            forecast_data.append({
-                "date": row["date"].strftime("%Y-%m-%d"),
-                "direction": row["direction"],
-                "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
-                "simulated_price": float(row.get("simulated_price", 0)),
-            })
+    forecast_data = df_to_forecast_list(forecast_df) if forecast_df is not None and len(forecast_df) > 0 else []
     
     return {
         "backtest": backtest_data,
@@ -245,6 +347,7 @@ def get_full_predictions() -> Dict:
             "backtest_count": len(backtest_data),
             "forecast_count": len(forecast_data),
             "last_updated": datetime.now().isoformat(),
+            "is_loaded": False,  # Indicates fallback was used
         }
     }
 

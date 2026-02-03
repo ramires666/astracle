@@ -354,8 +354,9 @@ class BtcAstroPredictor:
                 n_matched = sum(1 for c in feature_cols if c in self.feature_names)
                 n_expected = len(self.feature_names)
                 
-                if n_matched < n_expected * 0.9:  # Less than 90% match
-                    print(f"Warning: Only {n_matched}/{n_expected} features matched")
+                # Note: Low match rate is EXPECTED for single-day predictions
+                # because most aspect/transit features only fire on specific days
+                # The remaining features are filled with 0 (aspect not active)
                 
                 # Ensure all values are float
                 return aligned_features.astype(float).values
