@@ -140,7 +140,7 @@ def calculate_bodies_for_dates(
     # ─────────────────────────────────────────────────────────────────────────────
     # ШАГ 3: Преобразуем даты в формат date (без времени)
     # ─────────────────────────────────────────────────────────────────────────────
-    date_list = pd.to_datetime(dates).dt.date
+    date_list = pd.to_datetime(pd.Series(dates)).dt.date
     iterator = tqdm(date_list, desc="Calculating bodies") if progress else date_list
     
     # ─────────────────────────────────────────────────────────────────────────────
