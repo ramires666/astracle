@@ -114,9 +114,10 @@ function setupEventListeners() {
         elements.backtestValue.textContent = `${days} days`;
         state.backtestDays = days;
 
-        // Redraw chart to update background colors
+        // Rebuild chart completely with new data range
         if (state.chart) {
-            state.chart.update();
+            state.chart.destroy();
+            initializeChart();
         }
     });
 
@@ -517,25 +518,14 @@ function initializeChart() {
                 {
                     label: 'Forecast',
                     data: cachedForecastData,
-                    borderColor: '#f7b731',
-                    backgroundColor: 'rgba(247, 183, 49, 0.05)',
+                    borderColor: 'rgba(50, 50, 50, 0.9)',  // Dark gray like matplotlib black
+                    backgroundColor: 'transparent',
                     fill: false,
-                    tension: 0.2,
-                    pointRadius: 0,  // No circles!
-                    pointHoverRadius: 4,
+                    tension: 0.1,
+                    pointRadius: 0,
+                    pointHoverRadius: 3,
                     borderWidth: 2,
                     order: 0,
-                    segment: {
-                        borderColor: ctx => {
-                            // Color based on prediction direction
-                            // (simulation moves in prediction direction, so colors will match)
-                            const forecast = state.cachedForecast[ctx.p0DataIndex] || state.predictions[ctx.p0DataIndex];
-                            if (forecast) {
-                                return forecast.direction === 'UP' ? '#22c55e' : '#ef4444';
-                            }
-                            return '#f7b731';
-                        },
-                    },
                 },
             ],
         },
