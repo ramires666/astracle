@@ -794,7 +794,9 @@ print(f"   Best recall_min: {best_metric:.3f}")
 
 # %%
 # Предсказания
-y_pred_proba = model.predict_proba(X_test)[:, 1]
+# XGBBaseline uses internal model.model for probabilities
+X_test_scaled = model.scaler.transform(X_test)
+y_pred_proba = model.model.predict_proba(X_test_scaled)[:, 1]
 y_pred = (y_pred_proba >= best_threshold).astype(int)
 
 # %%
