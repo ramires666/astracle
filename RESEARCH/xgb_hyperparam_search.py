@@ -513,7 +513,11 @@ for i, params in enumerate(param_combos):
         results.append(res)
         
         if "error" not in res:
+            r_up = res['recall_up']
+            r_down = res['recall_down']
             r_min = res['recall_min']
+            f1 = res.get('f1_macro', 0)
+            acc = res.get('bal_acc', 0)
             mcc = res['mcc']
             
             # Update best
@@ -523,8 +527,10 @@ for i, params in enumerate(param_combos):
                 best_so_far["combo"] = f"n={n_est} d={max_d} lr={lr}"
                 best_so_far["params"] = model_params.copy()
             
-            print(f"{params_str:<50} → R_MIN={r_min:.3f} MCC={mcc:.3f}")
-            print(f"   🏆 BEST: R_MIN={best_so_far['R_MIN']:.3f} ({best_so_far['combo']})")
+            # Вывод всех метрик в одну строку
+            metrics_str = f"R↑={r_up:.2f} R↓={r_down:.2f} R_MIN={r_min:.3f} F1={f1:.3f} ACC={acc:.3f} MCC={mcc:.3f}"
+            print(f"{params_str:<45} → {metrics_str}")
+            print(f"   🏆 BEST: R_MIN={best_so_far['R_MIN']:.3f} MCC={best_so_far.get('MCC', 0):.3f} ({best_so_far['combo']})")
         else:
             print(f"{params_str:<50} → ERROR: {res.get('error')}")
             
