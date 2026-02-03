@@ -362,12 +362,12 @@ CONFIGS = {
         "baseline_mcc": 0.159,
     },
     "CONFIG_2": {
-        "name": "New Best (both all bodies)",
+        "name": "New Best (both -Uranus,Pluto)",
         "coord_mode": "both",
         "orb_mult": 0.15,
         "gauss_window": 300,
         "gauss_std": 70.0,
-        "exclude_bodies": None,
+        "exclude_bodies": ["Uranus", "Pluto"],
         "baseline_r_min": 0.587,
         "baseline_mcc": 0.182,
     },
@@ -391,6 +391,10 @@ SUBSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
 
 # colsample_bytree — доля признаков на каждое дерево
 COLSAMPLES = [0.6, 0.7, 0.8, 0.9, 1.0]
+
+# early_stopping_rounds — остановка если валидация не улучшается
+# (по умолчанию 50 в XGBBaseline, но можно переопределить)
+EARLY_STOPPING = 50
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Выбор КАКУЮ конфигурацию тестировать (меняйте здесь!)
@@ -480,6 +484,7 @@ for i, params in enumerate(param_combos):
         "learning_rate": lr,
         "subsample": subsample,
         "colsample_bytree": colsample,
+        "early_stopping_rounds": EARLY_STOPPING,
     }
     
     params_str = f"[{i+1}/{len(param_combos)}] n={n_est} d={max_d} lr={lr}"
@@ -663,12 +668,13 @@ print(f"🌍 Config: {config['name']}")
 # %%
 # Импорты для полного анализа
 from RESEARCH.labeling import create_balanced_labels
-from RESEARCH.features import build_full_features, get_feature_inventory
+from RESEARCH.features import build_full_features, get_feature_inventory, get_feature_columns
 from RESEARCH.astro_engine import calculate_aspects_for_dates
 from RESEARCH.model_training import (
     train_xgb_model, 
-    prepare_train_test_split, 
-    tune_threshold_max_min_recall
+    split_dataset,
+    prepare_xy,
+    tune_threshold,
 )
 from RESEARCH.visualization import (
     plot_confusion_matrix,
@@ -677,6 +683,21 @@ from RESEARCH.visualization import (
 )
 from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
+
+# %%
+# 📍 Пересчёт астро-данных для финального анализа (с правильным config)
+print(f"\n📍 Recalculating astro data for config: {config['name']}")
+print(f"   coord_mode: {config['coord_mode']}")
+print(f"   exclude_bodies: {config['exclude_bodies']}")
+
+df_bodies_final, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
+    df_market["date"], settings, coord_mode=config["coord_mode"], progress=True
+)
+bodies_by_date_final = geo_by_date if geo_by_date else helio_by_date
+
+print("\n📐 Calculating angles...")
+angles_cache_final = precompute_angles_for_dates(bodies_by_date_final, progress=True)
+print("✓ Done!")
 
 # %%
 # Создаём метки с лучшими параметрами Гаусса
@@ -691,13 +712,13 @@ df_labels = create_balanced_labels(
     label_mode="balanced_detrended",
 )
 print(f"   Labels created: {len(df_labels)} rows")
-print(f"   Distribution: {df_labels['label'].value_counts().to_dict()}")
+print(f"   Distribution: {df_labels['target'].value_counts().to_dict()}")
 
 # %%
 # Вычисляем аспекты
 print("\n📐 Calculating aspects...")
 df_aspects = calculate_aspects_for_dates(
-    bodies_by_date,
+    bodies_by_date_final,  # ← Используем пересчитанные данные
     settings,
     orb_mult=config["orb_mult"],
     progress=True,
@@ -708,7 +729,7 @@ print(f"   Aspects: {len(df_aspects)} rows")
 # Строим признаки
 print("\n🔧 Building features...")
 df_features = build_full_features(
-    df_bodies,
+    df_bodies_final,  # ← Используем пересчитанные данные
     df_aspects,
     df_transits=None,
     include_pair_aspects=True,
@@ -724,32 +745,35 @@ df_dataset = merge_features_with_labels(df_features, df_labels)
 print(f"   Dataset shape: {df_dataset.shape}")
 
 # %%
-# Train/Test split
+# Train/Val/Test split (time-based)
 print("\n📊 Splitting data...")
-train_df, test_df, feature_cols = prepare_train_test_split(
-    df_dataset, test_size=0.2, random_state=42
-)
-print(f"   Train: {len(train_df)}, Test: {len(test_df)}")
+train_df, val_df, test_df = split_dataset(df_dataset, train_ratio=0.7, val_ratio=0.15)
+print(f"   Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
-X_train, y_train = train_df[feature_cols], train_df["label"]
-X_test, y_test = test_df[feature_cols], test_df["label"]
+feature_cols = get_feature_columns(df_dataset)
+X_train, y_train = prepare_xy(train_df, feature_cols)
+X_val, y_val = prepare_xy(val_df, feature_cols)
+X_test, y_test = prepare_xy(test_df, feature_cols)
 
 # %%
 # Обучаем модель с лучшими параметрами
 print("\n🌳 Training XGBoost with best hyperparameters...")
 model = train_xgb_model(
     X_train, y_train,
-    model_params=BEST_PARAMS,
+    X_val, y_val,
+    feature_names=feature_cols,
+    n_classes=2,
     device=device,
+    **BEST_PARAMS,
 )
 print("   ✓ Model trained!")
 
 # %%
 # Тюним порог
 print("\n🎯 Tuning threshold...")
-best_threshold, metrics = tune_threshold_max_min_recall(model, X_test, y_test)
+best_threshold, best_metric = tune_threshold(model, X_val, y_val, metric="recall_min")
 print(f"   Best threshold: {best_threshold:.3f}")
-print(f"   Metrics: {metrics}")
+print(f"   Best recall_min: {best_metric:.3f}")
 
 # %%
 # Предсказания
@@ -789,10 +813,7 @@ print(f"📈 Gap:         {recall_gap:.3f}")
 # %%
 # Plot Confusion Matrix
 print("\n📊 Plotting confusion matrix...")
-fig, ax = plt.subplots(figsize=(8, 6))
-plot_confusion_matrix(y_test, y_pred, ax=ax, title="Confusion Matrix (Best Hyperparams)")
-plt.tight_layout()
-plt.show()
+plot_confusion_matrix(y_test, y_pred, label_names=["DOWN", "UP"])
 
 # %%
 # Plot Predictions vs Actual
@@ -800,12 +821,19 @@ print("\n📈 Plotting predictions...")
 
 # Добавляем цены для визуализации
 test_df_plot = test_df.copy()
-test_df_plot["date"] = pd.to_datetime(test_df_plot["date"])
+if "date" in test_df_plot.columns:
+    test_df_plot["date"] = pd.to_datetime(test_df_plot["date"])
+else:
+    test_df_plot = test_df_plot.reset_index()
 test_df_plot = test_df_plot.merge(
     df_market[["date", "close"]].assign(date=lambda x: pd.to_datetime(x["date"])), 
     on="date", 
-    how="left"
+    how="left",
+    suffixes=("", "_market")
 )
+# Use market close if exists
+if "close_market" in test_df_plot.columns:
+    test_df_plot["close"] = test_df_plot["close_market"]
 
 fig, axes = plt.subplots(2, 1, figsize=(14, 10))
 
@@ -816,9 +844,9 @@ ax1.plot(test_df_plot["date"], test_df_plot["close"], 'k-', alpha=0.7, label="Pr
 # Highlight predictions
 up_mask = y_pred == 1
 down_mask = y_pred == 0
-ax1.scatter(test_df_plot["date"][up_mask], test_df_plot["close"][up_mask], 
+ax1.scatter(test_df_plot["date"].values[up_mask], test_df_plot["close"].values[up_mask], 
             c='green', alpha=0.5, s=20, label="Pred UP")
-ax1.scatter(test_df_plot["date"][down_mask], test_df_plot["close"][down_mask], 
+ax1.scatter(test_df_plot["date"].values[down_mask], test_df_plot["close"].values[down_mask], 
             c='red', alpha=0.5, s=20, label="Pred DOWN")
 ax1.set_ylabel("Price")
 ax1.set_title("Predictions on Test Data")
@@ -827,7 +855,7 @@ ax1.grid(True, alpha=0.3)
 
 # Plot 2: Accuracy over time (rolling)
 ax2 = axes[1]
-correct = (y_pred == y_test.values).astype(int)
+correct = (y_pred == y_test).astype(int)
 rolling_acc = pd.Series(correct).rolling(50, min_periods=10).mean()
 ax2.plot(test_df_plot["date"], rolling_acc, 'b-', linewidth=2)
 ax2.axhline(y=0.5, color='r', linestyle='--', label="Random (50%)")
@@ -845,10 +873,9 @@ plt.show()
 # %%
 # Feature Importance
 print("\n📊 Feature Importance (Top 20)...")
-fig, ax = plt.subplots(figsize=(12, 8))
-plot_feature_importance(model, feature_cols, top_n=20, ax=ax)
-plt.tight_layout()
-plt.show()
+from RESEARCH.model_training import get_feature_importance
+importance_df = get_feature_importance(model, feature_cols, top_n=20)
+plot_feature_importance(importance_df, title="Top 20 Features by Importance")
 
 # %%
 # ══════════════════════════════════════════════════════════════════════════════════
