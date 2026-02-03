@@ -267,19 +267,15 @@ class BtcAstroPredictor:
         """
         Calculate astrological features for a target date.
         
-        This is a simplified version for inference. For full feature set,
-        see RESEARCH/astro_engine.py.
+        Uses the same feature pipeline as training (RESEARCH modules).
+        Features are reindexed to match the model's expected feature order.
         
         Args:
             target_date: Date to calculate features for
             
         Returns:
-            Feature vector as numpy array
+            Feature vector as numpy array, aligned with self.feature_names
         """
-        # Placeholder - this will be properly implemented with astro_features.py
-        # For now, we need the feature generation pipeline
-        
-        # Import from RESEARCH if available
         try:
             from RESEARCH.astro_engine import (
                 init_ephemeris,
@@ -293,39 +289,78 @@ class BtcAstroPredictor:
             
             settings = init_ephemeris()
             
-            # Calculate for single date
+            # Calculate for single date using the same pipeline as training
             dates = pd.Series([target_date])
-            df_bodies, geo_dict, helio_dict = calculate_bodies_for_dates_multi(
-                dates, settings, self.config["coord_mode"], progress=False
-            )
+            coord_mode = self.config.get("coord_mode", "both")
+            orb_mult = self.config.get("orb_mult", 0.1)
             
-            # Get natal bodies
-            natal_dt_str = f"{self.config['birth_date']}T12:00:00"
+            # Calculate body positions (geo + helio if coord_mode="both")
+            df_bodies, geo_dict, helio_dict = calculate_bodies_for_dates_multi(
+                dates, settings, coord_mode, progress=False
+            )
+            bodies_by_date = geo_dict
+            
+            # Calculate phases (moon phases, elongations)
+            df_phases = calculate_phases_for_dates(bodies_by_date, progress=False)
+            
+            # Get natal bodies for transit calculations
+            birth_date = self.config.get("birth_date", "2009-10-10")
+            natal_dt_str = f"{birth_date}T12:00:00"
             natal_bodies = get_natal_bodies(natal_dt_str, settings)
             
-            # Calculate features
-            df_phases = calculate_phases_for_dates(geo_dict, progress=False)
+            # Calculate transits (current planets to natal positions)
             df_transits = calculate_transits_for_dates(
-                geo_dict, natal_bodies, settings,
-                orb_mult=self.config["orb_mult"], progress=False
+                bodies_by_date, natal_bodies, settings,
+                orb_mult=orb_mult, progress=False
             )
+            
+            # Calculate aspects (current planets to each other)
             df_aspects = calculate_aspects_for_dates(
-                geo_dict, settings,
-                orb_mult=self.config["orb_mult"], progress=False
+                bodies_by_date, settings,
+                orb_mult=orb_mult, progress=False
             )
             
-            # Build feature vector
+            # Build full feature set using same function as training
             df_features = build_full_features(
-                df_bodies, df_aspects, df_transits=df_transits, df_phases=df_phases,
-                include_pair_aspects=True, include_transit_aspects=True
+                df_bodies, df_aspects, 
+                df_transits=df_transits, 
+                df_phases=df_phases,
+                include_pair_aspects=True,
+                include_transit_aspects=True
             )
             
-            # Get feature vector for target date
-            if len(df_features) > 0:
-                feature_cols = [c for c in df_features.columns if c != "date"]
-                return df_features[feature_cols].iloc[0].values
-            else:
+            if len(df_features) == 0:
                 raise ValueError("No features generated for date")
+            
+            # Get the feature row (exclude date column)
+            feature_cols = [c for c in df_features.columns if c != "date"]
+            feature_row = df_features[feature_cols].iloc[0]
+            
+            # IMPORTANT: Reindex to match model's expected feature order
+            # This ensures features are in the exact order the model was trained on
+            if self.feature_names:
+                # Create a series with all expected features, fill missing with 0
+                aligned_features = pd.Series(0.0, index=self.feature_names)
+                
+                # Fill in the features we calculated
+                for col in feature_cols:
+                    if col in aligned_features.index:
+                        val = feature_row[col]
+                        # Convert booleans to float
+                        if isinstance(val, (bool, np.bool_)):
+                            val = float(val)
+                        aligned_features[col] = val
+                
+                n_matched = sum(1 for c in feature_cols if c in self.feature_names)
+                n_expected = len(self.feature_names)
+                
+                if n_matched < n_expected * 0.9:  # Less than 90% match
+                    print(f"Warning: Only {n_matched}/{n_expected} features matched")
+                
+                # Ensure all values are float
+                return aligned_features.astype(float).values
+            else:
+                return feature_row.astype(float).values
             
         except ImportError as e:
             raise RuntimeError(f"Feature calculation requires RESEARCH modules: {e}")
