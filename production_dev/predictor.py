@@ -246,9 +246,9 @@ class BtcAstroPredictor:
             # At 100% confidence: 1.5% move (maximum)
             move_percent = 0.003 + 0.012 * confidence_strength
             
-            # Apply direction with small jitter for natural look
-            # Jitter is ±0.3% random noise
-            jitter = np.random.uniform(-0.003, 0.003)
+            # Apply direction with larger jitter for natural look
+            # Jitter is ±0.6% random noise (increased from 0.3%)
+            jitter = np.random.uniform(-0.006, 0.006)
             price_change = direction * move_percent + jitter
             
             # Calculate new price

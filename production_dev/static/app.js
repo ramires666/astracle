@@ -14,7 +14,7 @@
 const CONFIG = {
     API_BASE: '',  // Same origin
     COINGECKO_API: 'https://api.coingecko.com/api/v3',
-    HISTORICAL_DAYS: 400,  // Load enough history to cover full backtest (1 year+)
+    HISTORICAL_DAYS: 1200,  // Load enough history to cover full backtest (3 years+)
     DEFAULT_FORECAST_DAYS: 90,
     CHART_ANIMATION_DURATION: 800,
 };

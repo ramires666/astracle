@@ -32,7 +32,7 @@ CACHE_FILES = {
 }
 
 # Time ranges
-BACKTEST_DAYS = 365   # 1 year of past predictions
+BACKTEST_DAYS = 1095   # 3 years of past predictions
 FORECAST_DAYS = 365   # 1 year of future predictions
 
 
