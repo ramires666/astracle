@@ -56,6 +56,11 @@ from itertools import product
 # =============================================================================
 # These are our custom modules for the research pipeline
 
+import sys
+import os
+# Add project root to sys.path to allow importing RESEARCH package
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
+
 from RESEARCH.data_loader import load_market_data
 from RESEARCH.labeling import create_balanced_labels
 from RESEARCH.astro_engine import (
@@ -464,6 +469,7 @@ def run_full_grid_search(df_market, settings, device='cpu'):
     print("\n" + "=" * 70)
     print("🚀 STARTING GRID SEARCH")
     print("=" * 70)
+    best_recall_min = -1.0
     
     for i, (coord, gw, gs, orb, excl) in enumerate(combos):
         # Create string representation of excluded bodies
@@ -502,6 +508,10 @@ def run_full_grid_search(df_market, settings, device='cpu'):
             'threshold': result['threshold'],
         })
         
+        if result['recall_min'] > best_recall_min:
+            best_recall_min = result['recall_min']
+            print(f"🌟 NEW BEST: R_MIN={best_recall_min:.3f} (MCC={result['mcc']:.3f}) "
+                  f"params: {coord} W={gw} S={gs:.0f} O={orb} excl={excl_str}")
         # Print progress
         print(f"[{i+1:3d}/{len(combos)}] {coord:5s} W={gw} S={gs:.0f} O={orb} "
               f"excl={excl_str:20s} → R_MIN={result['recall_min']:.3f} "
