@@ -32,7 +32,8 @@ let state = {
     accuracyStats: null,     // Backtest accuracy statistics
     isLoading: false,
     modelInfo: null,
-    backtestDays: 180,       // How many backtest days to show (controlled by slider)
+    backtestDays: 180,       // How many history days to show (controlled by slider)
+    forecastDays: 90,        // How many forecast days to show (controlled by slider)
 };
 
 // =============================================================================
@@ -108,7 +109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // =============================================================================
 
 function setupEventListeners() {
-    // Backtest slider - updates how much history to show
+    // History slider - updates how much past data to show
     elements.backtestSlider.addEventListener('input', (e) => {
         const days = parseInt(e.target.value);
         elements.backtestValue.textContent = `${days} days`;
@@ -121,12 +122,20 @@ function setupEventListeners() {
         }
     });
 
-    // Days slider
+    // Forecast slider - updates how much future to show
     elements.daysSlider.addEventListener('input', (e) => {
-        elements.daysValue.textContent = `${e.target.value} days`;
+        const days = parseInt(e.target.value);
+        elements.daysValue.textContent = `${days} days`;
+        state.forecastDays = days;
+
+        // Rebuild chart with new forecast range
+        if (state.chart) {
+            state.chart.destroy();
+            initializeChart();
+        }
     });
 
-    // Predict button
+    // Predict button - regenerates forecast prices
     elements.predictBtn.addEventListener('click', () => {
         const days = parseInt(elements.daysSlider.value);
         generateForecast(days);
@@ -238,6 +247,13 @@ async function fetchCachedPredictions() {
 function updateAccuracyDisplay(stats) {
     // Update accuracy badge if it exists
     if (elements.accuracyBadge) {
+        // Hide badge if no accuracy data (0% is meaningless)
+        if (!stats || stats.total === 0 || stats.accuracy === 0) {
+            elements.accuracyBadge.style.display = 'none';
+            return;
+        }
+
+        elements.accuracyBadge.style.display = 'block';
         const accuracyPct = (stats.accuracy * 100).toFixed(1);
         elements.accuracyBadge.textContent = `${accuracyPct}% Historical Accuracy`;
 
@@ -418,40 +434,59 @@ function initializeChart() {
             const today = new Date().toISOString().split('T')[0];
 
             // Combine backtest and forecast for background coloring
+            // Use same slicing as chart data
+            const backtestSlice = state.cachedBacktest.slice(-state.backtestDays);
+            const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
             const allPredictions = [
-                ...state.cachedBacktest.slice(-state.backtestDays).map(p => ({ ...p, isPast: true })),
-                ...state.cachedForecast.map(p => ({ ...p, isPast: false })),
+                ...backtestSlice.map(p => ({ ...p, isPast: true })),
+                ...forecastSlice.map(p => ({ ...p, isPast: false })),
             ];
 
-            if (allPredictions.length === 0) return;
+            // Debug logging (remove after fixing)
+            if (allPredictions.length === 0) {
+                console.warn('⚠️ No predictions for background:', {
+                    cachedBacktest: state.cachedBacktest.length,
+                    cachedForecast: state.cachedForecast.length,
+                    backtestDays: state.backtestDays,
+                });
+                return;
+            }
 
             ctx.save();
 
+            let drawnCount = 0;
             allPredictions.forEach((pred, index) => {
-                const date = pred.date;
-                const x = scales.x.getPixelForValue(date);
+                // Parse date properly
+                const dateStr = pred.date;
+                const dateObj = new Date(dateStr);
+                const x = scales.x.getPixelForValue(dateObj);
 
                 // Calculate width for each day region
-                const nextDate = allPredictions[index + 1]?.date;
-                const nextX = nextDate ? scales.x.getPixelForValue(nextDate) : x + 5;
+                const nextPred = allPredictions[index + 1];
+                let nextX;
+                if (nextPred) {
+                    nextX = scales.x.getPixelForValue(new Date(nextPred.date));
+                } else {
+                    nextX = x + 10;  // Default width for last item
+                }
                 const width = Math.max(nextX - x, 2);
 
                 // Skip if outside chart area
                 if (x < chartArea.left - width || x > chartArea.right + width) return;
 
-                // Solid background colors like matplotlib
-                // Past = more saturated, Future = lighter
+                // Solid background colors
+                // Past = lighter shades, Future = more saturated
                 let color;
                 if (pred.direction === 'UP') {
                     color = pred.isPast
-                        ? 'rgba(134, 239, 172, 0.35)'  // Saturated green (past)
-                        : 'rgba(187, 247, 208, 0.25)'; // Light green (future)
+                        ? 'rgba(187, 247, 208, 0.45)'  // Light green (past/history)
+                        : 'rgba(74, 222, 128, 0.55)';  // Saturated green (future)
                 } else if (pred.direction === 'DOWN') {
                     color = pred.isPast
-                        ? 'rgba(252, 165, 165, 0.35)'  // Saturated red/pink (past)
-                        : 'rgba(254, 202, 202, 0.25)'; // Light red/pink (future)
+                        ? 'rgba(254, 202, 202, 0.45)'  // Light red/pink (past/history)
+                        : 'rgba(248, 113, 113, 0.55)'; // Saturated red (future)
                 } else {
-                    color = 'rgba(150, 150, 150, 0.1)'; // Gray for unknown
+                    color = 'rgba(150, 150, 150, 0.2)';
                 }
 
                 ctx.fillStyle = color;
@@ -461,7 +496,14 @@ function initializeChart() {
                     Math.min(width, chartArea.right - x),
                     chartArea.bottom - chartArea.top
                 );
+                drawnCount++;
             });
+
+            // Debug: log how many backgrounds were drawn
+            if (drawnCount === 0 && allPredictions.length > 0) {
+                console.warn('⚠️ 0 backgrounds drawn but', allPredictions.length, 'predictions exist');
+                console.log('Sample prediction:', allPredictions[0]);
+            }
 
             // Draw vertical line for today
             const todayX = scales.x.getPixelForValue(today);
@@ -485,14 +527,16 @@ function initializeChart() {
         }
     };
 
-    // Prepare historical data for chart
-    const historicalData = state.historicalPrices.map(hp => ({
+    // Prepare historical data for chart - SLICED by backtestDays
+    const historicalSlice = state.historicalPrices.slice(-state.backtestDays);
+    const historicalData = historicalSlice.map(hp => ({
         x: hp.date,
         y: hp.price,
     }));
 
-    // Prepare forecast data from cache
-    const cachedForecastData = state.cachedForecast.map(f => ({
+    // Prepare forecast data from cache - SLICED by forecastDays
+    const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
+    const cachedForecastData = forecastSlice.map(f => ({
         x: f.date,
         y: f.simulated_price || 0,
     }));
@@ -506,11 +550,13 @@ function initializeChart() {
                     label: 'Actual Price',
                     data: historicalData,
                     borderColor: 'rgba(255, 255, 255, 0.8)',
-                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    backgroundColor: 'transparent',
                     fill: false,
                     tension: 0.2,
                     pointRadius: 0,
-                    pointHoverRadius: 4,
+                    pointHoverRadius: 0,
+                    pointStyle: false,  // Completely disable points
+                    pointHitRadius: 10,  // Still allow tooltip interaction
                     borderWidth: 2,
                     order: 1,
                 },
@@ -523,7 +569,9 @@ function initializeChart() {
                     fill: false,
                     tension: 0.1,
                     pointRadius: 0,
-                    pointHoverRadius: 3,
+                    pointHoverRadius: 0,
+                    pointStyle: false,  // Completely disable points
+                    pointHitRadius: 10,
                     borderWidth: 2,
                     order: 0,
                 },
