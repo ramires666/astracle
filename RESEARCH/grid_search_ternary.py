@@ -50,7 +50,7 @@ from typing import Dict, List, Any, Optional
 
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
+# NOTE: tqdm removed - causes output blocking in notebooks
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
@@ -684,8 +684,21 @@ start_time = time.time()
 # Results storage
 results = []
 
-# Progress bar
-pbar = tqdm(total=total_combos, desc="Grid Search")
+# Track best result for up_down balance
+best_up_down_min = 0.0
+best_params_str = ""
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# CHECKPOINT SAVING: Save results every N tests to avoid losing progress
+# ─────────────────────────────────────────────────────────────────────────────────
+CHECKPOINT_EVERY = 50  # Save checkpoint every 50 tests
+checkpoint_dir = PROJECT_ROOT / "RESEARCH" / "reports"
+checkpoint_dir.mkdir(parents=True, exist_ok=True)
+checkpoint_path = checkpoint_dir / "grid_search_checkpoint.csv"
+print(f"💾 Checkpoint will save every {CHECKPOINT_EVERY} tests to: {checkpoint_path.name}")
+
+# Progress tracking (no tqdm - avoids notebook blocking)
+test_count = 0
 
 for label_params in label_combos_list:
     # ─────────────────────────────────────────────────────────────────────────────
@@ -713,6 +726,12 @@ for label_params in label_combos_list:
                 metrics = run_single_experiment(df_dataset, model_params_copy, device)
                 
                 # ─────────────────────────────────────────────────────────────────
+                # Calculate UP/DOWN balance metrics
+                # ─────────────────────────────────────────────────────────────────
+                up_down_min = min(metrics["recall_down"], metrics["recall_up"])
+                up_down_gap = abs(metrics["recall_down"] - metrics["recall_up"])
+                
+                # ─────────────────────────────────────────────────────────────────
                 # Store results
                 # ─────────────────────────────────────────────────────────────────
                 result = {
@@ -726,24 +745,59 @@ for label_params in label_combos_list:
                     "recall_up": metrics["recall_up"],
                     "recall_min": metrics["recall_min"],
                     "recall_gap": metrics["recall_gap"],
+                    # NEW: UP/DOWN balance metrics
+                    "up_down_min": up_down_min,
+                    "up_down_gap": up_down_gap,
                 }
                 results.append(result)
                 
-                # Update progress bar with best score so far
-                pbar.set_postfix({
-                    "best_bal_acc": max(r["bal_acc"] for r in results),
-                })
+                # ─────────────────────────────────────────────────────────────────
+                # Format short params string
+                # ─────────────────────────────────────────────────────────────────
+                params_short = (
+                    f"h={label_params.get('horizon', '?')}, "
+                    f"gw={label_params.get('gauss_window', '?')}, "
+                    f"orb={feature_params.get('orb_multiplier', '?')}, "
+                    f"coord={feature_params.get('coord_mode', '?')[:3]}, "
+                    f"depth={model_params.get('max_depth', '?')}, "
+                    f"lr={model_params.get('learning_rate', '?')}, "
+                    f"wp={model_params.get('weight_power', '?')}"
+                )
+                
+                # ─────────────────────────────────────────────────────────────────
+                # Print current result with metrics
+                # ─────────────────────────────────────────────────────────────────
+                test_count += 1
+                print(
+                    f"[{test_count:4d}/{total_combos}] D={metrics['recall_down']:.2f} U={metrics['recall_up']:.2f} "
+                    f"| ud_min={up_down_min:.2f} gap={up_down_gap:.2f} "
+                    f"| {params_short}"
+                )
+                
+                # ─────────────────────────────────────────────────────────────────
+                # Check if new best (by up_down_min)
+                # ─────────────────────────────────────────────────────────────────
+                if up_down_min > best_up_down_min:
+                    best_up_down_min = up_down_min
+                    best_params_str = params_short
+                    print(f"  ⭐ NEW BEST! up_down_min={up_down_min:.3f} | {params_short}")
+                
+                # ─────────────────────────────────────────────────────────────────
+                # CHECKPOINT: Save results every N tests
+                # ─────────────────────────────────────────────────────────────────
+                if len(results) % CHECKPOINT_EVERY == 0:
+                    df_checkpoint = pd.DataFrame(results)
+                    df_checkpoint.to_csv(checkpoint_path, index=False)
+                    print(f"  💾 Checkpoint saved: {len(results)} results → {checkpoint_path.name}")
                 
             except Exception as e:
-                print(f"\n⚠️ Error: {e}")
-                pbar.set_postfix({"error": str(e)[:20]})
-            
-            pbar.update(1)
-
-pbar.close()
+                test_count += 1
+                print(f"[{test_count:4d}/{total_combos}] ⚠️ Error: {e}")
 
 elapsed = time.time() - start_time
 print(f"\n✓ Grid search completed in {elapsed/60:.1f} minutes")
+print(f"\n🏆 BEST BY UP/DOWN BALANCE: up_down_min={best_up_down_min:.3f}")
+print(f"   Params: {best_params_str}")
 
 # %%
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -753,22 +807,43 @@ print(f"\n✓ Grid search completed in {elapsed/60:.1f} minutes")
 df_results = pd.DataFrame(results)
 
 if not df_results.empty:
-    # Sort by balanced accuracy
-    df_results = df_results.sort_values("bal_acc", ascending=False)
-    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TOP 10 BY UP/DOWN BALANCE (most important for trading!)
+    # ─────────────────────────────────────────────────────────────────────────────
     print("\n" + "=" * 80)
-    print("TOP 10 CONFIGURATIONS BY BALANCED ACCURACY")
+    print("🏆 TOP 10 BY UP/DOWN BALANCE (best for trading)")
+    print("=" * 80)
+    
+    display_cols_balance = [
+        "horizon", "orb_multiplier", "coord_mode", "weight_power",
+        "max_depth", "learning_rate",
+        "recall_down", "recall_up", "up_down_min", "up_down_gap"
+    ]
+    
+    df_by_balance = df_results.sort_values(
+        ["up_down_min", "up_down_gap"], 
+        ascending=[False, True]  # max up_down_min, min up_down_gap
+    )
+    print(df_by_balance[display_cols_balance].head(10).to_string(index=False))
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TOP 10 BY BALANCED ACCURACY
+    # ─────────────────────────────────────────────────────────────────────────────
+    print("\n" + "=" * 80)
+    print("TOP 10 BY BALANCED ACCURACY")
     print("=" * 80)
     
     display_cols = [
-        "horizon", "gauss_window", "orb_multiplier", "weight_power",
+        "horizon", "orb_multiplier", "coord_mode", "weight_power",
         "max_depth", "learning_rate",
         "bal_acc", "f1_macro", "recall_min", "recall_gap"
     ]
-    print(df_results[display_cols].head(10).to_string(index=False))
+    
+    df_by_acc = df_results.sort_values("bal_acc", ascending=False)
+    print(df_by_acc[display_cols].head(10).to_string(index=False))
     
     print("\n" + "=" * 80)
-    print("TOP 10 CONFIGURATIONS BY RECALL_MIN (balanced across classes)")
+    print("TOP 10 BY RECALL_MIN (all 3 classes balanced)")
     print("=" * 80)
     
     df_by_recall = df_results.sort_values(
