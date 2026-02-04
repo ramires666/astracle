@@ -165,6 +165,109 @@ The `daily_retrain.py` script:
 - **Transparent**: Users can trust the accuracy numbers shown on the dashboard
 
 
+## 🧪 Statistical Significance (Why ~60% Is Not Random)
+
+A number like "60%" can look small, so it is fair to ask:
+
+> Could this performance be just random luck?
+
+Below is a simple, *scientific* sanity-check that answers that question.
+
+### What `R_MIN = 0.603` Actually Means
+
+This project often reports **R_MIN** (minimum recall across classes).
+
+For binary classification:
+- Recall(DOWN) = "out of all true DOWN days, how many did we predict as DOWN?"
+- Recall(UP) = "out of all true UP days, how many did we predict as UP?"
+- `R_MIN = min(Recall(DOWN), Recall(UP))`
+
+So `R_MIN = 0.603` means:
+- Recall(DOWN) ≥ 60.3%
+- Recall(UP) ≥ 60.3%
+
+on a **time-based holdout test split** (no shuffling).
+
+### Coin-Flip Test (Binomial p-value)
+
+In `RESEARCH/birthdate_deep_search.ipynb` the time split is:
+`Train=2109, Val=452, Test=453` → **N_test = 453**.
+
+Key fact:
+- If both recalls are ≥ 60.3%, then **overall accuracy is also ≥ 60.3%**.
+  This makes a *conservative* test possible even if you only know `R_MIN`.
+
+Now assume a "random predictor" that flips a fair coin every day (50/50).
+
+Probability to get **≥ 60.3% correct** on 453 independent days:
+- `p ≈ 4.7e-06` (one-sided binomial test)
+- about **1 in 214,000**
+
+That is strong evidence the result is not random.
+
+Even if you apply a very conservative multiple-comparisons correction
+(`36` grid-search attempts → Bonferroni ×36), you still get:
+- `p ≈ 1.7e-04`
+
+Reproduce the number:
+```python
+from math import ceil
+from scipy.stats import binomtest
+
+n_test = 453
+r_min = 0.6029411764705882  # 60.3%
+
+# Accuracy is at least R_MIN, so this is a conservative (worst-case) test.
+k_min = ceil(r_min * n_test)
+
+p_value = binomtest(k_min, n_test, 0.5, alternative="greater").pvalue
+print("p_value =", p_value)
+```
+
+### Confidence Interval (How Uncertain Is The Score?)
+
+With `N_test = 453`, a score around 60% has a reasonably tight uncertainty band.
+Even the conservative case `k_min / n_test` has a 95% confidence interval that stays
+well above 50% (Wilson 95% CI ≈ `[0.559, 0.649]`).
+
+### MCC Sanity Check (Correlation-Like Metric)
+
+This project also reports **MCC** (Matthews Correlation Coefficient).
+
+Plain interpretation:
+- `MCC = 0.0` means "no relationship" (random-like)
+- `MCC = 1.0` means "perfect predictions"
+
+For the split model we got `MCC ≈ 0.315` on `N_test = 453`.
+
+If you treat MCC as a correlation coefficient (it is the Pearson correlation between
+two binary variables), then a quick Fisher z-test gives a very small p-value
+(`p ≈ 4.5e-12`, two-sided). This is an approximation, but it points the same way:
+the result is not random.
+
+```python
+import math
+from scipy.stats import norm
+
+n_test = 453
+mcc = 0.3150965594739174
+
+z = 0.5 * math.log((1 + mcc) / (1 - mcc)) * math.sqrt(n_test - 3)
+p_value = 2 * (1 - norm.cdf(abs(z)))
+
+print("p_value =", p_value)
+```
+
+### Important Scientific Caveats
+
+- **Time series are not perfectly independent** (days are correlated). A stricter analysis
+  would use a block bootstrap. The simple binomial test above is still a good first sanity check.
+- **Avoid selecting hyperparameters on the test set**. For "publication-clean" evaluation:
+  pick the winner on validation only, then report test performance once.
+
+If you want to recompute the split metrics end-to-end and verify they match the artifact,
+use: `scripts/validate_split_model_metrics.py`.
+
 
 ## 🚀 Quick Start
 

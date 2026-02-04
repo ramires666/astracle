@@ -148,27 +148,88 @@ class BtcAstroPredictor:
         
         # Prepare input array
         X = np.array([features])
-        
-        # Get the actual XGBClassifier from the wrapper
-        # XGBBaseline wraps XGBClassifier and adds a scaler, but for inference
-        # with aligned features (filled with 0 for missing), we can skip the scaler
-        if hasattr(self.model, 'model'):
-            # XGBBaseline wrapper - use internal XGBClassifier directly
-            xgb_model = self.model.model
-        else:
-            # Plain XGBClassifier
-            xgb_model = self.model
-        
-        # Predict probabilities directly (skip scaler as features are already aligned)
-        # XGBoost handles feature names internally if provided during training
-        proba = xgb_model.predict_proba(X)[0]
-        
-        # Apply optimal threshold (default 0.5, can be tuned)
-        threshold = 0.5  # Use default threshold for balanced predictions
-        direction = 1 if proba[1] >= threshold else 0
-        confidence = proba[direction]
+
+        # ---------------------------------------------------------------------
+        # IMPORTANT: How we do inference (this is where the previous bug was)
+        # ---------------------------------------------------------------------
+        # Our research training code uses `src.models.xgb.XGBBaseline`.
+        #
+        # XGBBaseline is NOT just an XGBoost model:
+        # - It contains a fitted `RobustScaler` (model.scaler)
+        # - It trains the internal XGBoost classifier on SCALED features
+        #
+        # That means at inference time we MUST apply the same scaler,
+        # otherwise the XGBoost trees will receive numbers in the wrong scale
+        # and predictions will look almost random (very bad backtest).
+        proba = self._predict_proba(X)[0]
+
+        # ---------------------------------------------------------------------
+        # Threshold (decision boundary)
+        # ---------------------------------------------------------------------
+        # In research we tune a probability threshold on the validation split
+        # (see RESEARCH.model_training.tune_threshold, metric="recall_min").
+        #
+        # To reproduce the exact notebook metrics, the tuned threshold should be
+        # stored in the model artifact config.
+        #
+        # If it is missing, we fall back to 0.5 (standard).
+        threshold = float(
+            self.config.get("decision_threshold", self.config.get("threshold", 0.5))
+        )
+
+        # Binary class: index 1 is "UP", index 0 is "DOWN"
+        direction = 1 if float(proba[1]) >= threshold else 0
+        confidence = float(proba[direction])
         
         return direction, confidence
+
+    def _predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """
+        Predict class probabilities for a feature matrix.
+
+        Why this helper exists:
+        - We have TWO artifact formats in this repo:
+          1) Split model from research: `XGBBaseline` (has a scaler!)
+          2) Some older full models: plain `xgboost.sklearn.XGBClassifier`
+
+        If we don't handle both cases, the frontend cache can silently become
+        wrong (history looks much worse than the notebook).
+
+        Args:
+            X: Feature matrix (n_samples, n_features) in the SAME column order
+               as `self.feature_names` (we ensure that in `_calculate_features`).
+
+        Returns:
+            Array of probabilities with shape (n_samples, 2):
+            - [:, 0] = P(DOWN)
+            - [:, 1] = P(UP)
+        """
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Case 1: Our wrapper (research pipeline)
+        if isinstance(self.model, XGBBaseline):
+            # Extremely rare edge case: training data had only one class,
+            # so the model becomes a constant predictor.
+            if getattr(self.model, "constant_class", None) is not None:
+                const = int(self.model.constant_class)
+                out = np.zeros((X.shape[0], 2), dtype=float)
+                out[:, const] = 1.0
+                return out
+
+            # Normal case: scale -> predict_proba
+            X_scaled = self.model.scaler.transform(X)
+            return self.model.model.predict_proba(X_scaled)
+
+        # Case 2: Plain XGBoost classifier (no scaler stored)
+        # We assume it was trained on raw (unscaled) features.
+        if hasattr(self.model, "predict_proba"):
+            return self.model.predict_proba(X)
+
+        raise TypeError(
+            "Unsupported model type in artifact. Expected XGBBaseline or XGBClassifier-like "
+            "object with predict_proba()."
+        )
     
     def predict_next_n_days(self, n_days: int = 90) -> List[Dict]:
         """

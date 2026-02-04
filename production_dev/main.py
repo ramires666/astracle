@@ -72,21 +72,68 @@ if STATIC_DIR.exists():
 # GLOBAL STATE
 # =============================================================================
 
-# Lazy-loaded predictor instance
-_predictor: Optional[BtcAstroPredictor] = None
+# ---------------------------------------------------------------------------
+# Dual-model setup (IMPORTANT FOR FRONTEND CORRECTNESS)
+# ---------------------------------------------------------------------------
+#
+# The UI has two "sides":
+# 1) History / Backtest
+#    - Must be HONEST (out-of-sample) and match notebook metrics
+#    - Uses the SPLIT model artifact produced by `RESEARCH/birthdate_deep_search.ipynb`
+#
+# 2) Forecast / Future Predictions
+#    - Should use ALL available data for best future performance
+#    - Uses the FULL model artifact (retrained periodically)
+#
+# If we accidentally use the full model for history, the history will look
+# "too good" (data leakage). If we accidentally use the split model for
+# forecast, the forecast will be weaker than it could be.
+#
+# So we keep TWO predictor instances and route each endpoint to the right one.
+SPLIT_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"
+FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"
+
+_split_predictor: Optional[BtcAstroPredictor] = None
+_full_predictor: Optional[BtcAstroPredictor] = None
 
 
-def get_predictor() -> BtcAstroPredictor:
+def get_split_predictor() -> BtcAstroPredictor:
     """
-    Get or initialize the predictor instance.
-    Uses lazy loading to avoid slow startup.
+    Get or initialize the SPLIT model predictor (honest backtest).
+
+    This model must NEVER be retrained on all data, otherwise the backtest
+    becomes dishonest. It should only be updated by explicitly running the
+    research notebook that exports `btc_astro_predictor.joblib`.
     """
-    global _predictor
-    if _predictor is None:
-        _predictor = BtcAstroPredictor()
-        if not _predictor.load_model():
-            raise RuntimeError("Failed to load prediction model")
-    return _predictor
+    global _split_predictor
+    if _split_predictor is None:
+        _split_predictor = BtcAstroPredictor(model_path=SPLIT_MODEL_PATH)
+        if not _split_predictor.load_model():
+            raise RuntimeError("Failed to load SPLIT prediction model")
+    return _split_predictor
+
+
+def get_full_predictor() -> BtcAstroPredictor:
+    """
+    Get or initialize the FULL model predictor (best forecast).
+
+    This model is allowed to be retrained on ALL available historical data,
+    because future dates are always unseen anyway.
+
+    Fallback logic:
+    - If the full model file is missing, we fall back to the split model,
+      because the service should still work (but forecasting is weaker).
+    """
+    global _full_predictor
+    if _full_predictor is None:
+        if FULL_MODEL_PATH.exists():
+            _full_predictor = BtcAstroPredictor(model_path=FULL_MODEL_PATH)
+            if not _full_predictor.load_model():
+                raise RuntimeError("Failed to load FULL prediction model")
+        else:
+            # Fallback: keep service alive even if full model isn't trained yet.
+            _full_predictor = get_split_predictor()
+    return _full_predictor
 
 
 # =============================================================================
@@ -112,7 +159,8 @@ async def health_check():
     Returns service status and model information.
     """
     try:
-        predictor = get_predictor()
+        # Health is reported for the split model (the one with honest metrics).
+        predictor = get_split_predictor()
         model_info = predictor.get_model_info()
         
         return HealthResponse(
@@ -154,7 +202,8 @@ async def get_predictions(
         )
     
     try:
-        predictor = get_predictor()
+        # Forecast endpoint must use FULL model (best possible future predictions).
+        predictor = get_full_predictor()
         
         # Generate predictions
         predictions = predictor.predict_next_n_days(days)
@@ -209,7 +258,8 @@ async def get_config():
     Get current model configuration.
     """
     try:
-        predictor = get_predictor()
+        # UI displays split-model config, because its metrics are honest.
+        predictor = get_split_predictor()
         return JSONResponse(content=predictor.get_model_info())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -297,11 +347,23 @@ async def startup_event():
     
     # Pre-load model
     try:
-        get_predictor()
-        print("✅ Model loaded successfully")
+        get_split_predictor()
+        print("✅ Split model loaded successfully")
     except Exception as e:
-        print(f"⚠️ Model not loaded: {e}")
-        print("   Model will be loaded on first prediction request")
+        print(f"⚠️ Split model not loaded: {e}")
+        print("   Split model will be loaded on first request that needs it")
+
+    # Pre-load full model (optional)
+    try:
+        get_full_predictor()
+        if FULL_MODEL_PATH.exists():
+            print("✅ Full model loaded successfully")
+        else:
+            print("⚠️ Full model file not found; forecast will use split model fallback")
+            print(f"   Expected path: {FULL_MODEL_PATH}")
+    except Exception as e:
+        print(f"⚠️ Full model not loaded: {e}")
+        print("   Forecast will use split model fallback until full model is fixed")
     
     # Pre-load prediction cache into memory (for instant /api/predictions/full responses)
     try:

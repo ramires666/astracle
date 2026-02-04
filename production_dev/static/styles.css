@@ -154,6 +154,12 @@ body {
     gap: var(--spacing-md);
 }
 
+.header-stats {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+}
+
 .logo {
     display: flex;
     align-items: center;

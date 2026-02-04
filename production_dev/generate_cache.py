@@ -166,7 +166,29 @@ def load_historical_prices() -> pd.DataFrame:
         print(f"⚠️ Could not load historical prices: {e}")
         import traceback
         traceback.print_exc()
-        return pd.DataFrame()
+
+    # ---------------------------------------------------------------------
+    # Fallback: local parquet (dev-friendly)
+    # ---------------------------------------------------------------------
+    # In many dev setups the PostgreSQL database is not running, but we still
+    # want to be able to regenerate the cache and see the dashboard working.
+    #
+    # This local file is already part of the repo and contains daily closes.
+    fallback_path = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
+    if fallback_path.exists():
+        try:
+            df = pd.read_parquet(fallback_path)
+            df["date"] = pd.to_datetime(df["date"])
+
+            cutoff = pd.Timestamp.now() - pd.Timedelta(days=1100)
+            df = df[df["date"] >= cutoff].copy()
+
+            print(f"📈 Loaded {len(df)} historical prices from local fallback: {fallback_path}")
+            return df
+        except Exception as e2:
+            print(f"⚠️ Local price fallback failed: {e2}")
+
+    return pd.DataFrame()
 
 
 def main():

@@ -7,6 +7,10 @@ that were used for initial data collection.
 Uses:
 - RESEARCH.data_loader for PostgreSQL market data
 - RESEARCH.astro_engine for ephemeris calculations
+
+Fallbacks:
+- If the database is not available (common in local dev),
+  we load prices from `data/market/processed/BTC_full_market_daily.parquet`.
 """
 
 import sys
@@ -66,6 +70,28 @@ def load_historical_prices(
         
     except Exception as e:
         print(f"Error loading from database: {e}")
+
+    # ---------------------------------------------------------------------
+    # Fallback: local parquet (dev-friendly)
+    # ---------------------------------------------------------------------
+    # The frontend chart needs historical prices even when DB is down.
+    # This file is included in the repo and is "good enough" for the UI.
+    fallback_path = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
+    if not fallback_path.exists():
+        return []
+
+    try:
+        df = pd.read_parquet(fallback_path)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+
+        df = df.tail(days).copy()
+        return [
+            {"date": row["date"].strftime("%Y-%m-%d"), "price": float(row["close"])}
+            for _, row in df.iterrows()
+        ]
+    except Exception as e2:
+        print(f"Error loading from local fallback parquet: {e2}")
         return []
 
 
@@ -90,7 +116,19 @@ def get_current_price(subject_id: Optional[str] = None) -> float:
     except Exception as e:
         print(f"Error getting current price: {e}")
     
-    # Fallback
+    # Fallback: local parquet
+    fallback_path = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
+    if fallback_path.exists():
+        try:
+            df = pd.read_parquet(fallback_path)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+            if not df.empty:
+                return float(df.iloc[-1]["close"])
+        except Exception as e2:
+            print(f"Error reading fallback price parquet: {e2}")
+
+    # Final fallback (UI still works, just less accurate)
     return 100000.0
 
 
@@ -168,10 +206,33 @@ def get_data_summary(subject_id: Optional[str] = None) -> Dict:
         }
         
     except Exception as e:
-        return {
-            "error": str(e),
-            "message": "Failed to load data summary"
-        }
+        print(f"Error loading summary from database: {e}")
+
+    # Fallback: local parquet
+    fallback_path = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
+    if fallback_path.exists():
+        try:
+            df = pd.read_parquet(fallback_path)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+            if df.empty:
+                raise ValueError("Fallback parquet is empty")
+
+            return {
+                "subject_id": subject_id,
+                "total_rows": int(len(df)),
+                "start_date": df["date"].min().strftime("%Y-%m-%d"),
+                "end_date": df["date"].max().strftime("%Y-%m-%d"),
+                "current_price": float(df.iloc[-1]["close"]),
+                "price_change_1d": float(
+                    (df.iloc[-1]["close"] - df.iloc[-2]["close"]) / df.iloc[-2]["close"] * 100
+                ) if len(df) > 1 else 0.0,
+                "source": "local_parquet_fallback",
+            }
+        except Exception as e2:
+            return {"error": str(e2), "message": "Failed to load fallback data summary"}
+
+    return {"error": str(e), "message": "Failed to load data summary"}
 
 
 # =============================================================================

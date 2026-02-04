@@ -269,6 +269,90 @@ Model exported to: ../models_artifacts/btc_astro_predictor.joblib
 
 ---
 
+## 🧪 Statistical Significance (Not Random)
+
+People often see "60%" and think: "that is close to 50%, maybe it's just luck".
+
+For this project, that intuition is misleading because the test set is *large enough*
+to make random luck extremely unlikely.
+
+### What R_MIN Guarantees
+
+`R_MIN = 0.603` means:
+- Recall(DOWN) ≥ 60.3%
+- Recall(UP) ≥ 60.3%
+
+on a strict time split (train/val/test, no shuffle).
+
+Important detail:
+- If both class recalls are ≥ 60.3%, then overall accuracy is also ≥ 60.3%.
+  This allows a conservative statistical test even if you only know `R_MIN`.
+
+### Binomial Coin-Flip Test (p-value)
+
+From the notebook output you should see something like:
+`Split: Train=2109, Val=452, Test=453` → **N_test = 453**.
+
+Now assume the model is random and flips a fair coin each day (50/50).
+
+Probability to reach **≥ 60.3% correct** on 453 trials:
+- `p ≈ 4.7e-06` (one-sided binomial test)
+- about **1 in 214,000**
+
+Even with a conservative multiple-comparisons correction
+(`36` grid-search attempts → Bonferroni ×36), you still get:
+- `p ≈ 1.7e-04`
+
+Reproduce:
+```python
+from math import ceil
+from scipy.stats import binomtest
+
+n_test = 453
+r_min = 0.6029411764705882
+k_min = ceil(r_min * n_test)  # accuracy is at least R_MIN
+
+print(binomtest(k_min, n_test, 0.5, alternative="greater").pvalue)
+```
+
+For reference, `k_min / n_test ≈ 0.605` has Wilson 95% CI ≈ `[0.559, 0.649]`.
+
+### MCC Sanity Check (Correlation-Like Metric)
+
+The notebook also reports `MCC ≈ 0.315`.
+
+Plain interpretation:
+- `MCC = 0.0` means random-like (no relationship)
+- `MCC = 1.0` means perfect predictions
+
+If you treat MCC as a correlation coefficient (it is the Pearson correlation between
+binary predictions and binary labels), a quick Fisher z-test gives:
+- `p ≈ 4.5e-12` (two-sided)
+
+Reproduce:
+```python
+import math
+from scipy.stats import norm
+
+n_test = 453
+mcc = 0.3150965594739174
+
+z = 0.5 * math.log((1 + mcc) / (1 - mcc)) * math.sqrt(n_test - 3)
+p_value = 2 * (1 - norm.cdf(abs(z)))
+
+print(p_value)
+```
+
+### Scientific Caveats (Be Honest)
+
+- Daily BTC data is a time series, so samples are not perfectly independent.
+  For a stricter analysis you can use a block bootstrap (still, the binomial test is a good first check).
+- Do not select hyperparameters on the test set. The clean protocol is:
+  tune on validation, report on test once.
+
+If you want an end-to-end verification script, see:
+`scripts/validate_split_model_metrics.py`.
+
 ## 📊 Expected Metric Progression
 
 | Step | Script | R_MIN | MCC | Key Change |

@@ -245,25 +245,46 @@ async function fetchCachedPredictions() {
  * Update accuracy display in the UI.
  */
 function updateAccuracyDisplay(stats) {
-    // Update accuracy badge if it exists
-    if (elements.accuracyBadge) {
-        // Hide badge if no accuracy data (0% is meaningless)
-        if (!stats || stats.total === 0 || stats.accuracy === 0) {
-            elements.accuracyBadge.style.display = 'none';
-            return;
-        }
+    // ---------------------------------------------------------------------
+    // IMPORTANT UI RULE:
+    // The big badge inside "Model Configuration" is reserved for notebook
+    // metrics (R_MIN / MCC) because that is what the research notebook
+    // produces and what the user expects to match 1:1.
+    //
+    // Backtest "accuracy" from the cache is a different number and can easily
+    // confuse people if it overwrites the R_MIN badge.
+    //
+    // So we show cached backtest accuracy as a *separate* small badge
+    // in the header (next to Model Status).
+    // ---------------------------------------------------------------------
+    if (!stats || stats.total === 0 || typeof stats.accuracy !== 'number') return;
 
-        elements.accuracyBadge.style.display = 'block';
-        const accuracyPct = (stats.accuracy * 100).toFixed(1);
-        elements.accuracyBadge.textContent = `${accuracyPct}% Historical Accuracy`;
+    const accuracyPct = (stats.accuracy * 100).toFixed(1);
 
-        // Color based on accuracy
+    // Create a second header badge lazily (only when we have data).
+    let accBadge = document.getElementById('backtest-acc-badge');
+    if (!accBadge) {
+        accBadge = document.createElement('div');
+        accBadge.id = 'backtest-acc-badge';
+        accBadge.className = 'stat-badge';
+        accBadge.innerHTML = `
+            <span class="stat-label">Backtest Acc</span>
+            <span class="stat-value" id="backtest-acc-value">--</span>
+        `;
+        elements.headerStats.appendChild(accBadge);
+    }
+
+    const valueEl = document.getElementById('backtest-acc-value');
+    if (valueEl) {
+        valueEl.textContent = `${accuracyPct}%`;
+
+        // Simple color scale: green (good) -> yellow (meh) -> red (bad)
         if (stats.accuracy >= 0.55) {
-            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #22c55e, #16a34a)';
+            valueEl.style.color = 'var(--accent-green)';
         } else if (stats.accuracy >= 0.50) {
-            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #eab308, #ca8a04)';
+            valueEl.style.color = 'var(--accent-gold)';
         } else {
-            elements.accuracyBadge.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+            valueEl.style.color = 'var(--accent-red)';
         }
     }
 }
