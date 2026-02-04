@@ -188,9 +188,17 @@ def merge_with_actual_prices(
     """
     Merge predictions with actual prices to calculate accuracy.
     
+    IMPORTANT: The model predicts the direction for the NEXT day.
+    So if we have a prediction for date X with direction "UP",
+    it means "price on day X+1 will be higher than on day X".
+    
+    To calculate accuracy, we compare:
+    - prediction[date] with actual_price[date+1] vs actual_price[date]
+    
     Adds columns:
-    - actual_price: Actual closing price
-    - price_change: Price change from previous day
+    - actual_price: Actual closing price on prediction date
+    - next_price: Actual closing price on next day  
+    - price_change: Price change from prediction date to next day
     - actual_direction: "UP" or "DOWN" based on actual movement
     - correct: Whether prediction was correct
     """
@@ -201,7 +209,10 @@ def merge_with_actual_prices(
     df["date"] = pd.to_datetime(df["date"])
     prices["date"] = pd.to_datetime(prices["date"])
     
-    # Merge with actual prices
+    # Sort prices by date for proper shifting
+    prices = prices.sort_values("date").reset_index(drop=True)
+    
+    # Merge with actual prices for the prediction date
     df = pd.merge(
         df,
         prices[["date", "close"]].rename(columns={"close": "actual_price"}),
@@ -209,18 +220,29 @@ def merge_with_actual_prices(
         how="left"
     )
     
-    # Calculate actual direction (compare to previous day)
+    # Add next day's price (shift prices by -1 to get next day)
+    prices["next_day_price"] = prices["close"].shift(-1)
+    df = pd.merge(
+        df,
+        prices[["date", "next_day_price"]],
+        on="date",
+        how="left"
+    )
+    
+    # Calculate actual direction (compare current day to next day)
+    # If prediction is for date X, we compare close[X+1] vs close[X]
     df = df.sort_values("date").reset_index(drop=True)
-    df["price_change"] = df["actual_price"].diff()
+    df["price_change"] = df["next_day_price"] - df["actual_price"]
     df["actual_direction"] = df["price_change"].apply(
-        lambda x: "UP" if x > 0 else "DOWN" if x < 0 else "FLAT"
+        lambda x: "UP" if x > 0 else "DOWN" if x < 0 else "FLAT" if pd.notna(x) else None
     )
     
     # Calculate correctness (use object dtype to allow None)
-    df["correct"] = (df["direction"] == df["actual_direction"]).astype(object)
-    
-    # First row has no previous day, so mark as None
-    df.loc[0, "correct"] = None
+    df["correct"] = None  # Initialize as None
+    valid_mask = df["actual_direction"].notna() & (df["actual_direction"] != "FLAT")
+    df.loc[valid_mask, "correct"] = (
+        df.loc[valid_mask, "direction"] == df.loc[valid_mask, "actual_direction"]
+    )
     
     return df
 

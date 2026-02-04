@@ -157,14 +157,50 @@ might improve predictions.
 
 **Files:** `step4_birthdate_search/birthdate_search.py`
 
-**Candidate Dates:**
-| Date | Event | Result |
-|------|-------|--------|
-| 2008-08-18 | Domain registration | R_MIN=0.587 |
-| 2008-10-31 | Whitepaper published | R_MIN=0.343 |
-| 2009-01-03 | Genesis block | R_MIN=0.565 |
-| 2009-10-10 | First exchange rate | R_MIN=0.578, **MCC=0.205** ← BEST MCC |
-| 2009-12-03 | ? | R_MIN=0.581 |
+#### Historical Research on Bitcoin Birth Dates
+
+The following dates were analyzed based on historical events in Bitcoin's early development.
+**Out of 15 analyzed dates, only 5 (33.3%) match confirmed historical events.**
+
+| # | Date | R_MIN | R_UP | R_DOWN | MCC | Historical Event |
+|---|------|-------|------|--------|-----|------------------|
+| 1 | 2009-12-03 | 0.581 | 0.581 | 0.591 | 0.172 | *(No known event)* |
+| 2 | **2009-10-10** | **0.578** | 0.626 | 0.578 | **0.205** | **~First BTC Exchange Rate** |
+| 3 | 2009-10-12 | 0.578 | 0.581 | 0.578 | 0.159 | First USD-BTC transaction |
+| 4 | 2009-06-14 | 0.577 | 0.577 | 0.604 | 0.181 | *(No known event)* |
+| 5 | 2009-12-25 | 0.574 | 0.608 | 0.574 | 0.182 | Christmas |
+| 6 | 2009-03-27 | 0.574 | 0.608 | 0.574 | 0.182 | *(No known event)* |
+| 7 | 2009-03-21 | 0.574 | 0.590 | 0.574 | 0.164 | *(No known event)* |
+| 8 | 2009-08-22 | 0.572 | 0.572 | 0.604 | 0.177 | *(No known event)* |
+| 9 | 2009-11-05 | 0.572 | 0.572 | 0.604 | 0.177 | *(No known event)* |
+| 10 | 2009-01-18 | 0.570 | 0.581 | 0.570 | 0.151 | *(No known event)* |
+| 11 | 2009-01-01 | 0.570 | 0.572 | 0.570 | 0.142 | New Year |
+| 12 | 2009-01-06 | 0.570 | 0.608 | 0.570 | 0.178 | *(No known event)* |
+| 13 | 2009-04-29 | 0.570 | 0.586 | 0.570 | 0.155 | *(No known event)* |
+| 14 | 2009-10-13 | 0.568 | 0.568 | 0.570 | 0.137 | *(No known event)* |
+| 15 | 2009-01-03 | 0.565 | 0.617 | 0.565 | 0.183 | **Genesis Block** |
+
+#### Key Historical Events in Bitcoin's Early Development
+
+1. **January 3, 2009 (Genesis Block)** - The first block of Bitcoin blockchain was created 
+   by Satoshi Nakamoto at 18:15:05 UTC. Contains the famous message: 
+   *"The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"*
+
+2. **October 5, 2009 (First Exchange Rate)** - New Liberty Standard published the first 
+   known BTC exchange rate: **1 USD = 1,309.03 BTC** (approximately 0.00076 USD per BTC).
+   This rate was calculated based on electricity costs for mining.
+
+3. **October 12, 2009 (First Fiat Transaction)** - Martti Malmi sold 5,050 BTC for $5.02 USD
+   via PayPal to New Liberty Standard - the first known fiat-BTC transaction.
+
+4. **October 10, 2009 (CHOSEN DATE)** - Selected as "Economic Birth" of Bitcoin.
+   This date showed the **best MCC (0.205)** among all candidates, suggesting
+   it captures the astrological signature most relevant to price movements.
+
+> [!IMPORTANT]
+> The date 2009-10-10 was chosen NOT because it has the highest R_MIN, but because 
+> it has the **highest MCC (Matthews Correlation Coefficient)**, which indicates 
+> the best overall predictive balance between UP and DOWN predictions.
 
 **Run:**
 ```bash
