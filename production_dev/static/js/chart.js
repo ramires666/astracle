@@ -15,6 +15,18 @@ import { CONFIG } from './config.js';
 import { elements } from './elements.js';
 import { state } from './state.js';
 
+function toTimeValueUTC(dateStr) {
+    // Convert "YYYY-MM-DD" into a millisecond timestamp at UTC midnight.
+    //
+    // Why we do this (super important, easy to miss):
+    // - `new Date("YYYY-MM-DD")` is parsed as *local timezone* in some browsers
+    //   and as *UTC* in others. That can shift the date and break chart math.
+    // - Chart.js time scale works best when we feed it a numeric timestamp.
+    //
+    // This makes background shading and split bands deterministic.
+    return Date.parse(`${dateStr}T00:00:00Z`);
+}
+
 function toIsoDateUTC(dateObj) {
     // Format a Date as "YYYY-MM-DD" in UTC (timezone-safe).
     return dateObj.toISOString().slice(0, 10);
@@ -93,18 +105,20 @@ function buildPredictionBackgroundPlugin() {
             ctx.save();
 
             allPredictions.forEach((pred, index) => {
-                // IMPORTANT: Pass the ISO date string directly.
-                // Using `new Date("YYYY-MM-DD")` can shift by timezone in some browsers.
-                const x = scales.x.getPixelForValue(pred.date);
+                const x = scales.x.getPixelForValue(toTimeValueUTC(pred.date));
 
                 // Width = distance to next day (pixel space).
                 const nextPred = allPredictions[index + 1];
-                let nextX = x + 10;
+                let nextX = x + 10; // fallback width for last rectangle
                 if (nextPred) {
-                    nextX = scales.x.getPixelForValue(nextPred.date);
+                    nextX = scales.x.getPixelForValue(toTimeValueUTC(nextPred.date));
                 }
                 const width = Math.max(nextX - x, 2);
 
+                // Defensive: if scale returns NaN (date parse issue), skip drawing.
+                if (!Number.isFinite(x) || !Number.isFinite(nextX)) return;
+
+                // Skip if outside chart area (with a small margin for performance).
                 if (x < chartArea.left - width || x > chartArea.right + width) return;
 
                 let color;
@@ -120,18 +134,17 @@ function buildPredictionBackgroundPlugin() {
                     color = 'rgba(150, 150, 150, 0.2)';
                 }
 
+                const left = Math.max(chartArea.left, x);
+                const right = Math.min(chartArea.right, x + width);
+                if (right <= left) return;
+
                 ctx.fillStyle = color;
-                ctx.fillRect(
-                    Math.max(x, chartArea.left),
-                    chartArea.top,
-                    Math.min(width, chartArea.right - x),
-                    chartArea.bottom - chartArea.top,
-                );
+                ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
             });
 
             // "Today" line for orientation
             const todayStr = toIsoDateUTC(new Date());
-            const todayX = scales.x.getPixelForValue(todayStr);
+            const todayX = scales.x.getPixelForValue(toTimeValueUTC(todayStr));
             if (todayX >= chartArea.left && todayX <= chartArea.right) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
                 ctx.lineWidth = 2;
@@ -175,11 +188,11 @@ function buildSplitBandPlugin() {
                 const color = splitColor(seg.split);
                 if (!color) return;
 
-                const x0 = scales.x.getPixelForValue(seg.startDate);
+                const x0 = scales.x.getPixelForValue(toTimeValueUTC(seg.startDate));
 
                 // End pixel: use endDate + 1 day so the segment includes the full last day.
                 const endPlusOne = addDaysIsoUTC(seg.endDate, 1);
-                const x1 = scales.x.getPixelForValue(endPlusOne);
+                const x1 = scales.x.getPixelForValue(toTimeValueUTC(endPlusOne));
 
                 const left = Math.max(chartArea.left, x0);
                 const right = Math.min(chartArea.right, x1);
@@ -272,7 +285,11 @@ export function initializeChart() {
             responsive: true,
             maintainAspectRatio: false,
             animation: { duration: CONFIG.CHART_ANIMATION_DURATION },
-            interaction: { intersect: false, mode: 'index' },
+            // IMPORTANT:
+            // We use `mode: "x"` so the tooltip matches points by *date* (x value),
+            // NOT by array index. Index-based tooltips can incorrectly show an
+            // "Actual Price" value for a future forecast day (because dataset lengths differ).
+            interaction: { intersect: false, mode: 'x' },
             plugins: {
                 legend: {
                     display: true,
@@ -291,6 +308,8 @@ export function initializeChart() {
                     borderWidth: 1,
                     padding: 12,
                     displayColors: true,
+                    mode: 'x',
+                    intersect: false,
                     callbacks: {
                         label: (context) => {
                             const label = context.dataset.label;

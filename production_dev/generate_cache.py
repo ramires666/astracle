@@ -36,6 +36,7 @@ from production_dev.backtest_cache_builder import build_split_model_backtest_cac
 def generate_forecast_predictions(
     predictor: BtcAstroPredictor,
     days: int = FORECAST_DAYS,
+    forecast_start_date: date | None = None,
     start_price: float = None,
 ) -> List[Dict]:
     """
@@ -44,6 +45,8 @@ def generate_forecast_predictions(
     Args:
         predictor: Loaded BtcAstroPredictor instance
         days: Number of future days to generate
+        forecast_start_date: First date to generate (inclusive).
+            If None, defaults to "tomorrow" (date.today() + 1).
         start_price: Starting price for simulation
         
     Returns:
@@ -52,7 +55,18 @@ def generate_forecast_predictions(
     print(f"\n🔮 Generating {days} days of FORECAST predictions...")
     
     predictions = []
-    start_date = date.today() + timedelta(days=1)  # Tomorrow
+    # IMPORTANT:
+    # We should NOT start the forecast from "tomorrow relative to when we ran the script",
+    # because that creates gaps when the market data (backtest) ends earlier.
+    #
+    # Example (the exact bug you reported):
+    # - last known actual price date in DB = Feb 4
+    # - cache script was run later / with a wrong clock -> forecast starts Feb 8
+    # - UI shows a gap Feb 5-7 (confusing and looks broken)
+    #
+    # So the caller can pass `forecast_start_date = last_backtest_date + 1`
+    # to guarantee continuity between history and forecast.
+    start_date = forecast_start_date or (date.today() + timedelta(days=1))  # default: tomorrow
     
     with tqdm(total=days, desc="Forecast", unit="day") as pbar:
         for i in range(days):
@@ -138,26 +152,58 @@ def main():
     print(f"   Rows: {len(backtest_df)}")
     print(f"   Range: {backtest_result.meta.get('start_date')} -> {backtest_result.meta.get('end_date')}")
     print(f"   Threshold: {backtest_result.meta.get('decision_threshold')}")
+
+    # Forecast should start right after the last backtest day (continuity, no gaps).
+    forecast_start_date = None
+    try:
+        end_str = backtest_result.meta.get("end_date")
+        if end_str:
+            forecast_start_date = date.fromisoformat(str(end_str)) + timedelta(days=1)
+    except Exception:
+        forecast_start_date = None
+
+    # Starting price for simulation:
+    # - If we have the last actual close price in backtest, use it.
+    #   This avoids a huge fake jump at the history->forecast boundary.
+    start_price = None
+    try:
+        if "actual_price" in backtest_df.columns:
+            last_price = backtest_df["actual_price"].dropna()
+            if len(last_price) > 0:
+                start_price = float(last_price.iloc[-1])
+    except Exception:
+        start_price = None
     
     # =========================================
     # FORECAST: Use full model (best predictions)
     # =========================================
     print("\n📦 Loading FULL model for forecast...")
     
-    # Check if full model exists, fallback to split if not
+    # Check if full model exists, fallback to split if not.
+    forecast_predictor = None
     if FULL_MODEL.exists():
-        forecast_predictor = BtcAstroPredictor(model_path=FULL_MODEL)
-        if not forecast_predictor.load_model():
-            print("⚠️ Full model failed, falling back to split model")
-            forecast_predictor = backtest_predictor
+        candidate = BtcAstroPredictor(model_path=FULL_MODEL)
+        if candidate.load_model():
+            forecast_predictor = candidate
+            print("✅ Forecast model loaded (FULL)")
         else:
-            print(f"✅ Forecast model loaded (FULL)")
-    else:
-        print("⚠️ Full model not found, using split model for forecast")
-        forecast_predictor = backtest_predictor
+            print("⚠️ Full model failed to load; will fall back to split model")
+
+    if forecast_predictor is None:
+        print("⚠️ Using SPLIT model for forecast fallback")
+        candidate = BtcAstroPredictor(model_path=SPLIT_MODEL)
+        if not candidate.load_model():
+            print("❌ ERROR: Could not load split model for forecast fallback.")
+            sys.exit(1)
+        forecast_predictor = candidate
     
     # Generate forecast predictions
-    forecast = generate_forecast_predictions(forecast_predictor, days=FORECAST_DAYS)
+    forecast = generate_forecast_predictions(
+        forecast_predictor,
+        days=FORECAST_DAYS,
+        forecast_start_date=forecast_start_date,
+        start_price=start_price,
+    )
     save_predictions_to_cache(forecast, "forecast")
     
     # Summary

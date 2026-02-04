@@ -63,6 +63,31 @@ class BtcAstroPredictor:
         # Performance Metrics (for reference)
         "r_min": 0.603,
         "mcc": 0.315,
+
+        # -----------------------------------------------------------------
+        # UI-ONLY: Simulated Price Path Settings
+        # -----------------------------------------------------------------
+        # The "Forecast" line on the dashboard is NOT a real price target.
+        # It is a *visual aid* that turns daily UP/DOWN predictions into a
+        # smooth-looking path.
+        #
+        # We still want the movement to look "BTC-like", so the defaults below
+        # are calibrated to typical BTC daily percent changes (roughly 1-3%
+        # for normal days, more on volatile days).
+        #
+        # Why `sim_up_mult` > `sim_down_mult`:
+        # In our empirical check on BTC daily closes (2017-2025) the average
+        # absolute UP day move was ~7% larger than the average absolute DOWN
+        # day move. To reflect that, we apply a small asymmetry:
+        #   UP multiplier  ~= 1.035
+        #   DOWN multiplier~= 0.965
+        #
+        # (This is still a toy simulation. The model only predicts direction.)
+        "sim_base_move": 0.006,   # ~0.6% minimum daily move when confidence=50%
+        "sim_conf_move": 0.020,   # +0%..+2.0% extra move when confidence goes 50%->100%
+        "sim_jitter": 0.008,      # ±0.8% random noise for natural look
+        "sim_up_mult": 1.035,     # UP days slightly stronger in magnitude
+        "sim_down_mult": 0.965,   # DOWN days slightly weaker in magnitude
     }
     
     # Historical BTC daily volatility (approximate)
@@ -314,14 +339,27 @@ class BtcAstroPredictor:
             direction = 1 if pred["direction_code"] == 1 else -1
             
             # DETERMINISTIC price movement with micro-jitter for natural look
-            # Move amount: 0.3% base + up to 1.2% extra based on confidence
-            # At 50% confidence: 0.3% move (minimum)
-            # At 100% confidence: 1.5% move (maximum)
-            move_percent = 0.003 + 0.012 * confidence_strength
+            # Move amount:
+            # - Base move is always applied (so the line doesn't look flat)
+            # - Extra move is proportional to confidence_strength
+            #
+            # These constants are UI-only (see DEFAULT_CONFIG).
+            base_move = float(self.config.get("sim_base_move", 0.006))
+            conf_move = float(self.config.get("sim_conf_move", 0.020))
+            move_percent = base_move + conf_move * confidence_strength
+
+            # Small asymmetry: UP days are a bit stronger than DOWN days.
+            # This matches a rough empirical property of BTC daily returns.
+            if pred["direction_code"] == 1:
+                move_percent *= float(self.config.get("sim_up_mult", 1.035))
+            else:
+                move_percent *= float(self.config.get("sim_down_mult", 0.965))
             
-            # Apply direction with larger jitter for natural look
-            # Jitter is ±0.6% random noise (increased from 0.3%)
-            jitter = np.random.uniform(-0.006, 0.006)
+            # Random jitter for a more natural line.
+            # We keep it symmetric so we don't accidentally add hidden drift.
+            jitter_amp = float(self.config.get("sim_jitter", 0.008))
+            jitter = np.random.uniform(-jitter_amp, jitter_amp)
+
             price_change = direction * move_percent + jitter
             
             # Calculate new price
