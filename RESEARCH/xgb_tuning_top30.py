@@ -14,7 +14,7 @@ import sys
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-from sklearn.model_selection import RandomizedSearchCV, PredefinedSplit
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.metrics import make_scorer, recall_score
 from pathlib import Path
 import ast
@@ -71,20 +71,24 @@ if not INPUT_CSV.exists():
         print(f"✅ Using: {INPUT_CSV.name}")
 
 # %%
-TEST_MODE = True  # True = 2 candidates, 2 iter | False = 30 candidates, 50 iter
+TEST_MODE = False  # False = full run | True = quick test
 
 # %%
-PARAM_DIST = {
-    'n_estimators': [100, 200, 300, 500, 700, 1000],
-    'max_depth': [3, 4, 5, 6, 7, 8, 10],
-    'learning_rate': [0.005, 0.01, 0.03, 0.05, 0.1, 0.2],
-    'subsample': [0.6, 0.7, 0.8, 0.9, 1.0],
-    'colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
-    'gamma': [0, 0.1, 0.2, 0.5],
-    'min_child_weight': [1, 3, 5],
+N_CANDIDATES = 5  # How many top candidates to tune
+
+# %%
+# Parameter grid (~150 combos, balanced between speed and coverage)
+PARAM_GRID = {
+    'n_estimators': [500, 700],
+    'max_depth': [3, 5, 7],
+    'learning_rate': [0.01, 0.03, 0.05],
+    'subsample': [0.7, 0.8],
+    'colsample_bytree': [0.7, 0.8],
+    'gamma': [0, 0.1],
+    'min_child_weight': [1, 3],
     'scale_pos_weight': [1], 
 }
-N_ITER = 50
+# Total combos: 2 * 3 * 3 * 2 * 2 * 2 * 2 * 1 = 144 per candidate
 
 # %%
 use_cuda_check, _ = check_cuda_available()
@@ -107,6 +111,33 @@ def recall_min_score(y_true, y_pred):
     return min(recalls)  # Return the WORST recall
 
 RECALL_MIN_SCORER = make_scorer(recall_min_score, greater_is_better=True)
+
+# %%
+# Threshold tuning for raw XGBClassifier (no wrapper)
+# Tries thresholds from 0.1 to 0.9 and finds the one that maximizes recall_min
+def tune_threshold_raw(model, X_val, y_val):
+    """
+    Find optimal probability threshold for best recall_min.
+    Returns (best_threshold, best_recall_min)
+    """
+    proba = model.predict_proba(X_val)[:, 1]  # Probability of class 1 (UP)
+    
+    best_t = 0.5
+    best_score = 0.0
+    
+    for t in np.linspace(0.1, 0.9, 41):  # 0.1, 0.12, 0.14, ..., 0.9
+        pred = (proba >= t).astype(int)
+        metrics = calc_metrics(y_val, pred, labels=[0, 1])
+        if metrics['recall_min'] > best_score:
+            best_score = metrics['recall_min']
+            best_t = t
+    
+    return best_t, best_score
+
+def predict_with_threshold(model, X, threshold=0.5):
+    """Predict using custom probability threshold."""
+    proba = model.predict_proba(X)[:, 1]
+    return (proba >= threshold).astype(int)
 
 # %% [markdown]
 # ## Load Candidates
@@ -231,7 +262,7 @@ final_results = []
 
 print("\n🚀 STARTING TUNING LOOP (pre-computed data)...")
 
-for i, (_, row) in enumerate(top_candidates.iterrows()):
+for i, (_, row) in enumerate(top_candidates.head(N_CANDIDATES).iterrows()):
     coord = row['coord_mode']
     gw = int(row['gauss_window'])
     gs = float(row['gauss_std'])
@@ -255,6 +286,9 @@ for i, (_, row) in enumerate(top_candidates.iterrows()):
     feature_cols = get_feature_columns(df_dataset)
     X_train, y_train = prepare_xy(train_df, feature_cols)
     X_val, y_val = prepare_xy(val_df, feature_cols)
+    X_test, y_test = prepare_xy(test_df, feature_cols)  # TEST set for final evaluation!
+    
+    print(f"Split: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
     
     # --- PredefinedSplit ---
     X_full = np.concatenate([X_train, X_val], axis=0)
@@ -262,53 +296,97 @@ for i, (_, row) in enumerate(top_candidates.iterrows()):
     test_fold = np.concatenate([np.full(len(X_train), -1), np.full(len(X_val), 0)])
     ps = PredefinedSplit(test_fold)
     
-    # --- RandomizedSearchCV ---
-    iter_limit = N_ITER if not TEST_MODE else 2
+    # --- Manual Grid Search with tqdm (visible progress in Jupyter) ---
+    from itertools import product
     
-    xgb_model = xgb.XGBClassifier(
-        objective='binary:logistic', eval_metric='logloss',
-        device=device if device == 'cuda' else 'cpu', 
-        tree_method='hist' if device == 'cuda' else 'auto'
-    )
+    # Generate all parameter combinations
+    param_names = list(PARAM_GRID.keys())
+    param_values = [PARAM_GRID[k] for k in param_names]
+    all_combos = list(product(*param_values))
     
-    search = RandomizedSearchCV(
-        xgb_model, PARAM_DIST, n_iter=iter_limit, 
-        scoring=RECALL_MIN_SCORER,  # Custom: min(recall_up, recall_down)
-        cv=ps, n_jobs=N_JOBS, verbose=0, 
-        random_state=42 + i,  # Different seed for each candidate = explore different HP combos
-        refit=False
-    )
+    best_score = -1
+    best_params = None
+    all_test_results = []  # Store ALL test results for intermediate saves
     
-    try:
-        search.fit(X_full, y_full)
-        best_params = search.best_params_
+    for test_idx, combo in enumerate(tqdm(all_combos, desc=f"Candidate {i+1}", leave=False)):
+        params = dict(zip(param_names, combo))
         
-        # Retrain on X_train only
-        final_model = xgb.XGBClassifier(
+        model = xgb.XGBClassifier(
             objective='binary:logistic', eval_metric='logloss',
             device=device if device == 'cuda' else 'cpu', 
             tree_method='hist' if device == 'cuda' else 'auto',
-            **best_params
+            **params
         )
-        final_model.fit(X_train, y_train, sample_weight=compute_sample_weight('balanced', y_train))
-        y_pred_val = final_model.predict(X_val)
-        metrics = calc_metrics(y_val, y_pred_val, labels=[0, 1])
+        model.fit(X_train, y_train, sample_weight=compute_sample_weight('balanced', y_train))
+        y_pred_val = model.predict(X_val)
+        score = recall_min_score(y_val, y_pred_val)
         
-        print(f"   📉 BASELINE: R_MIN={row['recall_min']:.3f} MCC={row['mcc']:.3f}")
-        print(f"   📈 TUNED:    R_MIN={metrics['recall_min']:.3f} MCC={metrics['mcc']:.3f}")
+        # Store test result
+        all_test_results.append({'params': params, 'recall_min': score})
         
-        record = {
-            'rank': i + 1, 'coord_mode': coord, 'gauss_window': gw, 'gauss_std': gs,
-            'orb_mult': orb, 'exclude_bodies': row['exclude_bodies'],
-            'baseline_recall_min': row['recall_min'], 'baseline_mcc': row['mcc'],
-            'tuned_recall_min': metrics['recall_min'], 'tuned_mcc': metrics['mcc'],
-            'best_params': str(best_params),
-        }
-        final_results.append(record)
-        pd.DataFrame(final_results).to_csv(OUTPUT_CSV, index=False)
+        # Print EVERY test result
+        is_best = "✨" if score > best_score else "  "
+        print(f"   {is_best} d={params['max_depth']} lr={params['learning_rate']:.2f} sub={params['subsample']:.1f} γ={params.get('gamma', 0):.1f} → R_MIN={score:.3f}")
         
-    except Exception as e:
-        print(f"   ❌ Failed: {e}")
+        if score > best_score:
+            best_score = score
+            best_params = params
+        
+        # --- INTERMEDIATE SAVE every 50 tests ---
+        if (test_idx + 1) % 50 == 0:
+            interim_df = pd.DataFrame([{
+                'candidate': i + 1, 'coord_mode': coord, 'gauss_window': gw, 'orb_mult': orb,
+                'tests_done': test_idx + 1, 'best_recall_min': best_score,
+                'best_params': str(best_params)
+            }])
+            interim_df.to_csv(OUTPUT_CSV.parent / f"xgb_interim_candidate_{i+1}.csv", index=False)
+            print(f"   💾 Saved interim at {test_idx + 1} tests")
+    
+    # Skip if no valid params found
+    if best_params is None:
+        print(f"   ❌ No valid params found")
+        continue
+    
+    # Retrain on X_train only
+    final_model = xgb.XGBClassifier(
+        objective='binary:logistic', eval_metric='logloss',
+        device=device if device == 'cuda' else 'cpu', 
+        tree_method='hist' if device == 'cuda' else 'auto',
+        **best_params
+    )
+    final_model.fit(X_train, y_train, sample_weight=compute_sample_weight('balanced', y_train))
+    
+    # --- Tune threshold on VAL, evaluate on TEST (like Phase 1!) ---
+    best_t_tuned, _ = tune_threshold_raw(final_model, X_val, y_val)
+    y_pred_test = predict_with_threshold(final_model, X_test, threshold=best_t_tuned)
+    metrics_tuned = calc_metrics(y_test, y_pred_test, labels=[0, 1])
+    
+    # --- LOCAL BASELINE: Default params, same process ---
+    local_baseline = xgb.XGBClassifier(
+        objective='binary:logistic', eval_metric='logloss',
+        n_estimators=500, max_depth=6, learning_rate=0.03,  # Phase 1 defaults
+        device=device if device == 'cuda' else 'cpu', 
+        tree_method='hist' if device == 'cuda' else 'auto',
+    )
+    local_baseline.fit(X_train, y_train, sample_weight=compute_sample_weight('balanced', y_train))
+    best_t_base, _ = tune_threshold_raw(local_baseline, X_val, y_val)
+    y_pred_base = predict_with_threshold(local_baseline, X_test, threshold=best_t_base)
+    metrics_base = calc_metrics(y_test, y_pred_base, labels=[0, 1])
+    
+    print(f"   📊 LOCAL BASELINE: R_MIN={metrics_base['recall_min']:.3f} MCC={metrics_base['mcc']:.3f} (t={best_t_base:.2f})")
+    print(f"   📈 TUNED:          R_MIN={metrics_tuned['recall_min']:.3f} MCC={metrics_tuned['mcc']:.3f} (t={best_t_tuned:.2f})")
+    print(f"   📉 Phase1 (ref):   R_MIN={row['recall_min']:.3f} MCC={row['mcc']:.3f}")
+    print(f"   🔧 Best: depth={best_params['max_depth']}, lr={best_params['learning_rate']:.3f}, sub={best_params['subsample']}, gamma={best_params.get('gamma', 0)}")
+    
+    record = {
+        'rank': i + 1, 'coord_mode': coord, 'gauss_window': gw, 'gauss_std': gs,
+        'orb_mult': orb, 'exclude_bodies': row['exclude_bodies'],
+        'baseline_recall_min': metrics_base['recall_min'], 'baseline_mcc': metrics_base['mcc'],
+        'tuned_recall_min': metrics_tuned['recall_min'], 'tuned_mcc': metrics_tuned['mcc'],
+        'best_params': str(best_params),
+    }
+    final_results.append(record)
+    pd.DataFrame(final_results).to_csv(OUTPUT_CSV, index=False)
 
 # %%
 print("=" * 60)

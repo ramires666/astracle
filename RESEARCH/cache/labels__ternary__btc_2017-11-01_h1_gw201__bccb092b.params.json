@@ -1,0 +1,11 @@
+{
+  "subject_id": "btc",
+  "start_date": "2017-11-01",
+  "type": "ternary",
+  "horizon": 1,
+  "gauss_window": 201,
+  "gauss_std": 50.0,
+  "price_mode": "raw",
+  "balance_classes": true,
+  "threshold_used": 167.8346707979117
+}

@@ -1,0 +1,7 @@
+{
+  "orb_mult": 1.0,
+  "coord_mode": "geo",
+  "date_range": "2017-11-01_2026-01-31",
+  "include_phases": true,
+  "include_pair_aspects": true
+}

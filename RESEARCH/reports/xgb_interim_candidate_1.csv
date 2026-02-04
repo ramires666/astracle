@@ -1,0 +1,2 @@
+candidate,coord_mode,gauss_window,orb_mult,tests_done,best_recall_min,best_params
+1,both,300,0.25,250,0.5267489711934157,"{'n_estimators': 500, 'max_depth': 3, 'learning_rate': 0.03, 'subsample': 0.8, 'colsample_bytree': 0.7, 'gamma': 0, 'min_child_weight': 1, 'scale_pos_weight': 1}"
