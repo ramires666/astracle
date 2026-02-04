@@ -19,9 +19,11 @@
 6. [Running the Prediction Service](#-running-the-prediction-service)
 7. [API Reference](#-api-reference)
 8. [Training Your Own Model](#-training-your-own-model)
-9. [Configuration](#-configuration)
-10. [FAQ](#-frequently-asked-questions)
-11. [Disclaimer](#-disclaimer)
+9. [Research Timeline](#-research-timeline)
+10. [Reproducibility](#-reproducibility)
+11. [Configuration](#-configuration)
+12. [FAQ](#-frequently-asked-questions)
+13. [Disclaimer](#-disclaimer)
 
 ---
 
@@ -224,7 +226,17 @@ ostrofun/
 │   ├── data_loader.py          # PostgreSQL data loading
 │   ├── labeling.py             # Price movement labeling
 │   ├── birthdate_deep_search.ipynb  # Model hyperparameter tuning
-│   └── xgb_hyperparam_search.py     # Grid search for best params
+│   ├── xgb_hyperparam_search.py     # Grid search for best params
+│   └── research_timeline.md    # 📋 Complete research history
+│
+├── 📂 RESEARCH-REPRODUCE/      # 🔄 REPRODUCIBILITY PACKAGE
+│   ├── README.md               # Step-by-step reproduction guide
+│   ├── reproduce_all.py        # Master script to reproduce 60.3%
+│   ├── step1_baseline/         # Initial pipeline files
+│   ├── step2_grid_search/      # Grid search files
+│   ├── step3_body_ablation/    # Body ablation study
+│   ├── step4_birthdate_search/ # Birth date search
+│   └── step5_deep_tuning/      # Final 60.3% configuration
 │
 ├── 📂 src/                     # 📦 CORE LIBRARY
 │   └── models/
@@ -421,6 +433,68 @@ jupyter notebook birthdate_deep_search.ipynb
 | Colsample | 0.6 |
 | **R_MIN Score** | **0.603** |
 | **MCC Score** | **0.315** |
+
+---
+
+## 📜 Research Timeline
+
+The model was developed through a systematic research process over 2 days (2026-02-02 → 2026-02-03):
+
+### Metric Progression
+
+| Phase | R_MIN | MCC | Key Discovery |
+|-------|-------|-----|---------------|
+| Baseline | 50.0% | 0.0 | Random guessing |
+| Initial XGB | 50.4% | 0.06 | Grid search started |
+| Body Ablation | 55.7% | 0.12 | Uranus+Pluto = noise |
+| Param Tuning | 57.9% | 0.16 | Tight orbs (0.05) work |
+| +Natal Transits | 59.0% | 0.19 | orb=0.075, win=200 |
+| **Deep Tuning** | **60.3%** | **0.315** | birth=2009-10-10 |
+
+### Key Research Files
+
+| File | Purpose |
+|------|---------|
+| `RESEARCH/research_timeline.md` | Complete research history |
+| `RESEARCH/birthdate_deep_search.ipynb` | Final 60.3% model |
+| `RESEARCH/xgb_hyperparam_search.ipynb` | XGBoost tuning |
+| `RESEARCH/body_ablation_research.ipynb` | Which bodies matter |
+
+📋 **Full documentation:** See [`RESEARCH/research_timeline.md`](RESEARCH/research_timeline.md)
+
+---
+
+## 🔄 Reproducibility
+
+All research results are fully reproducible! We provide a complete package to recreate the 60.3% recall model from scratch.
+
+### Quick Reproduction
+
+```bash
+cd RESEARCH-REPRODUCE
+conda activate btc
+python reproduce_all.py
+```
+
+### Step-by-Step Reproduction
+
+The `RESEARCH-REPRODUCE/` folder contains 5 steps:
+
+| Step | Script | Expected R_MIN |
+|------|--------|----------------|
+| 1 | `step1_baseline/main_pipeline.py` | ~50% |
+| 2 | `step2_grid_search/grid_search.py` | ~52-55% |
+| 3 | `step3_body_ablation/xgb_hyperparam_search.py` | ~57-58% |
+| 4 | `step4_birthdate_search/birthdate_search.py` | ~58% |
+| 5 | `step5_deep_tuning/birthdate_deep_search.py` | **60.3%** |
+
+### Verification Checklist
+
+- [ ] Step 1: R_MIN ≈ 0.50 (baseline)
+- [ ] Step 3: R_MIN ≈ 0.58 (body ablation)
+- [ ] Step 5: R_MIN = 0.603, MCC = 0.315 (FINAL)
+
+📦 **Full guide:** See [`RESEARCH-REPRODUCE/README.md`](RESEARCH-REPRODUCE/README.md)
 
 ---
 
