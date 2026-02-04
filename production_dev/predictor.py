@@ -67,22 +67,11 @@ class BtcAstroPredictor:
         # -----------------------------------------------------------------
         # UI-ONLY: Simulated Price Path Settings
         # -----------------------------------------------------------------
-        # The "Forecast" line on the dashboard is NOT a real price target.
-        # It is a *visual aid* that turns daily UP/DOWN predictions into a
-        # smooth-looking path.
-        #
-        # We still want the movement to look "BTC-like", so the defaults below
-        # are calibrated to typical BTC daily percent changes (roughly 1-3%
-        # for normal days, more on volatile days).
-        #
-        # Why `sim_up_mult` > `sim_down_mult`:
-        # In our empirical check on BTC daily closes (2017-2025) the average
-        # absolute UP day move was ~7% larger than the average absolute DOWN
-        # day move. To reflect that, we apply a small asymmetry:
-        #   UP multiplier  ~= 1.035
-        #   DOWN multiplier~= 0.965
-        #
-        # (This is still a toy simulation. The model only predicts direction.)
+        # The dashboard "Forecast" line is NOT a price target. It is a visual
+        # random-walk that converts (UP/DOWN + confidence) into a smooth path.
+        # We also apply a small asymmetry (UP days a bit stronger than DOWN),
+        # because on BTC daily closes (2017-2025) the average absolute UP move
+        # was ~7% larger than the average absolute DOWN move.
         "sim_base_move": 0.006,   # ~0.6% minimum daily move when confidence=50%
         "sim_conf_move": 0.020,   # +0%..+2.0% extra move when confidence goes 50%->100%
         "sim_jitter": 0.008,      # ±0.8% random noise for natural look
@@ -509,25 +498,3 @@ class BtcAstroPredictor:
             "expected_r_min": self.config.get("r_min"),
             "expected_mcc": self.config.get("mcc"),
         }
-
-
-# =============================================================================
-# MODULE TEST
-# =============================================================================
-if __name__ == "__main__":
-    print("Testing BtcAstroPredictor...")
-    
-    predictor = BtcAstroPredictor()
-    print(f"Model info: {predictor.get_model_info()}")
-    
-    # Try to load model
-    if predictor.load_model():
-        print("\nGenerating 7-day forecast...")
-        predictions = predictor.predict_next_n_days(7)
-        predictions = predictor.generate_price_path(predictions, seed=42)
-        
-        for pred in predictions:
-            print(f"  {pred['date']}: {pred['direction']} "
-                  f"({pred['confidence']:.1%}) → ${pred['simulated_price']:,.0f}")
-    else:
-        print("Model not found. Please train and export the model first.")

@@ -28,10 +28,12 @@ market:
   end_month: null
 
   # Prefer DB cache (market_daily) before downloading/parsing
-  use_db_cache: true
+  # NOTE: We now use parquet as the single source of truth.
+  use_db_cache: false
 
   # Write market_daily into DB after building (upsert)
-  write_db: true
+  # NOTE: Disabled to keep the pipeline DB-free.
+  write_db: false
 
   # If processed parquet exists, use it and skip download/parse
   use_parquet_cache: true

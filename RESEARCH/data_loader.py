@@ -1,9 +1,9 @@
 """
 Data loader module for RESEARCH pipeline.
-Loads market data directly from PostgreSQL database.
+Loads market data from local parquet (DB is no longer used).
 """
+from pathlib import Path
 import pandas as pd
-import psycopg2
 from datetime import datetime
 from typing import Optional
 
@@ -16,10 +16,11 @@ def load_market_data(
     end_date: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Load market daily data from PostgreSQL database.
+    Load market daily data from local parquet.
     
     Args:
-        subject_id: Subject ID to load (defaults to active subject)
+        subject_id: Subject ID to load (defaults to active subject).
+            We keep this argument for API compatibility, but parquet is global.
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
     
@@ -27,44 +28,24 @@ def load_market_data(
         DataFrame with columns: date, close
     """
     subject_id = subject_id or cfg.active_subject_id
-    db_url = cfg.db_url
-    
-    if not db_url:
-        raise ValueError("Database URL not configured in configs/db.yaml")
-    
-    # Build query (market_daily only has date and close)
-    query = """
-        SELECT date, close 
-        FROM market_daily 
-        WHERE subject_id = %s
-    """
-    params = [subject_id]
-    
-    if start_date:
-        query += " AND date >= %s"
-        params.append(start_date)
-    
-    if end_date:
-        query += " AND date <= %s"
-        params.append(end_date)
-    
-    query += " ORDER BY date"
-    
-    try:
-        conn = psycopg2.connect(db_url)
-        df = pd.read_sql_query(query, conn, params=params)
-        conn.close()
-    except Exception as e:
-        raise RuntimeError(f"Failed to load market data from DB: {e}")
+    parquet_path = _resolve_market_parquet_path(subject_id)
+
+    df = pd.read_parquet(parquet_path)
     
     if df.empty:
-        raise ValueError(f"No market data found for subject_id={subject_id}")
+        raise ValueError(f"No market data found in parquet: {parquet_path}")
     
     # Ensure date is datetime
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
+
+    if start_date:
+        df = df[df["date"] >= pd.to_datetime(start_date)]
+    if end_date:
+        df = df[df["date"] <= pd.to_datetime(end_date)]
+    df = df.reset_index(drop=True)
     
-    print(f"Loaded {len(df)} rows from DB for subject={subject_id}")
+    print(f"Loaded {len(df)} rows from parquet for subject={subject_id}")
     print(f"Date range: {df['date'].min().date()} -> {df['date'].max().date()}")
     
     return df
@@ -72,7 +53,7 @@ def load_market_data(
 
 def get_latest_date(subject_id: Optional[str] = None) -> Optional[datetime]:
     """
-    Get the latest date available for a subject in the database.
+    Get the latest date available in the parquet file.
     
     Args:
         subject_id: Subject ID to check (defaults to active subject)
@@ -81,27 +62,14 @@ def get_latest_date(subject_id: Optional[str] = None) -> Optional[datetime]:
         Latest date or None if no data
     """
     subject_id = subject_id or cfg.active_subject_id
-    db_url = cfg.db_url
-    
-    if not db_url:
-        return None
-    
     try:
-        conn = psycopg2.connect(db_url)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT MAX(date) FROM market_daily WHERE subject_id = %s",
-            (subject_id,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[0]:
-            return pd.Timestamp(result[0])
+        parquet_path = _resolve_market_parquet_path(subject_id)
+        df = pd.read_parquet(parquet_path, columns=["date"])
+        if df.empty:
+            return None
+        return pd.to_datetime(df["date"]).max()
     except Exception:
-        pass
-    
-    return None
+        return None
 
 
 def get_data_paths() -> dict:
@@ -112,3 +80,33 @@ def get_data_paths() -> dict:
         "processed_dir": cfg.processed_dir,
         "reports_dir": cfg.reports_dir,
     }
+
+
+def _resolve_market_parquet_path(subject_id: str) -> Path:
+    """
+    Pick the best available parquet file for market data.
+
+    Priority order (most complete first):
+    1) BTC_full_market_daily.parquet (archive + Binance merged)
+    2) {SYMBOL}_market_daily.parquet (Binance-only daily)
+    3) btc_market_daily.parquet (legacy name)
+    4) BTC_archive_market_daily.parquet (archive-only)
+    """
+    processed = cfg.processed_dir
+    symbol = (cfg.subject or {}).get("symbol", "")
+
+    candidates = [
+        processed / "BTC_full_market_daily.parquet",
+        processed / f"{symbol}_market_daily.parquet" if symbol else None,
+        processed / "btc_market_daily.parquet",
+        processed / "BTC_archive_market_daily.parquet",
+    ]
+
+    for path in candidates:
+        if path and path.exists():
+            return path
+
+    raise FileNotFoundError(
+        f"No market parquet found in {processed}. "
+        "Expected BTC_full_market_daily.parquet or a symbol-specific parquet."
+    )

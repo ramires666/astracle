@@ -15,28 +15,39 @@ import { CONFIG } from './config.js';
 import { elements } from './elements.js';
 import { state } from './state.js';
 
-function toTimeValueUTC(dateStr) {
-    // Convert "YYYY-MM-DD" into a millisecond timestamp at UTC midnight.
+function toTimeValue(dateStr) {
+    // Convert "YYYY-MM-DD" into a millisecond timestamp that matches the
+    // *local calendar day* for the user.
     //
-    // Why we do this (super important, easy to miss):
-    // - `new Date("YYYY-MM-DD")` is parsed as *local timezone* in some browsers
-    //   and as *UTC* in others. That can shift the date and break chart math.
-    // - Chart.js time scale works best when we feed it a numeric timestamp.
+    // Why we do NOT use `Date.parse(dateStr)` or `new Date(dateStr)`:
+    // - Some JS engines treat date-only strings as UTC, others as local time.
+    // - Chart.js (with the date-fns adapter) formats ticks in LOCAL time.
+    // - If we accidentally mix UTC parsing + local formatting, the chart can
+    //   shift by 1 day for US users (exactly the kind of bug you reported).
     //
-    // This makes background shading and split bands deterministic.
-    return Date.parse(`${dateStr}T00:00:00Z`);
+    // The most reliable approach is: parse the pieces ourselves and construct
+    // a local Date at midnight.
+    const [y, m, d] = String(dateStr).split('-').map((x) => Number(x));
+    return new Date(y, m - 1, d).getTime();
 }
 
-function toIsoDateUTC(dateObj) {
-    // Format a Date as "YYYY-MM-DD" in UTC (timezone-safe).
-    return dateObj.toISOString().slice(0, 10);
+function toIsoDateLocal(dateObj) {
+    // Format a Date as "YYYY-MM-DD" in LOCAL time.
+    //
+    // We use local time because Chart.js + date-fns displays ticks in local
+    // time by default. This keeps labels and tooltip dates consistent.
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
 }
 
-function addDaysIsoUTC(dateStr, days) {
-    // Add N days to an ISO date string in UTC (timezone-safe).
-    const d = new Date(`${dateStr}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + days);
-    return toIsoDateUTC(d);
+function addDaysIso(dateStr, days) {
+    // Add N days to a "YYYY-MM-DD" string (local calendar logic).
+    const [y, m, d] = String(dateStr).split('-').map((x) => Number(x));
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() + days);
+    return toIsoDateLocal(dt);
 }
 
 function splitColor(split) {
@@ -105,13 +116,13 @@ function buildPredictionBackgroundPlugin() {
             ctx.save();
 
             allPredictions.forEach((pred, index) => {
-                const x = scales.x.getPixelForValue(toTimeValueUTC(pred.date));
+                const x = scales.x.getPixelForValue(toTimeValue(pred.date));
 
                 // Width = distance to next day (pixel space).
                 const nextPred = allPredictions[index + 1];
                 let nextX = x + 10; // fallback width for last rectangle
                 if (nextPred) {
-                    nextX = scales.x.getPixelForValue(toTimeValueUTC(nextPred.date));
+                    nextX = scales.x.getPixelForValue(toTimeValue(nextPred.date));
                 }
                 const width = Math.max(nextX - x, 2);
 
@@ -143,8 +154,8 @@ function buildPredictionBackgroundPlugin() {
             });
 
             // "Today" line for orientation
-            const todayStr = toIsoDateUTC(new Date());
-            const todayX = scales.x.getPixelForValue(toTimeValueUTC(todayStr));
+            const todayStr = toIsoDateLocal(new Date());
+            const todayX = scales.x.getPixelForValue(toTimeValue(todayStr));
             if (todayX >= chartArea.left && todayX <= chartArea.right) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
                 ctx.lineWidth = 2;
@@ -188,11 +199,11 @@ function buildSplitBandPlugin() {
                 const color = splitColor(seg.split);
                 if (!color) return;
 
-                const x0 = scales.x.getPixelForValue(toTimeValueUTC(seg.startDate));
+                const x0 = scales.x.getPixelForValue(toTimeValue(seg.startDate));
 
                 // End pixel: use endDate + 1 day so the segment includes the full last day.
-                const endPlusOne = addDaysIsoUTC(seg.endDate, 1);
-                const x1 = scales.x.getPixelForValue(toTimeValueUTC(endPlusOne));
+                const endPlusOne = addDaysIso(seg.endDate, 1);
+                const x1 = scales.x.getPixelForValue(toTimeValue(endPlusOne));
 
                 const left = Math.max(chartArea.left, x0);
                 const right = Math.min(chartArea.right, x1);
@@ -237,12 +248,15 @@ export function initializeChart() {
     const ctx = elements.chartCanvas.getContext('2d');
 
     const backtestSlice = state.cachedBacktest.slice(-state.backtestDays);
+    // Feed the time scale numeric timestamps (local midnight) instead of raw strings.
+    // This avoids subtle timezone parsing differences across browsers and makes our
+    // background shading math line up perfectly with the plotted line.
     const historicalData = backtestSlice
         .filter((p) => p.actual_price != null)
-        .map((p) => ({ x: p.date, y: p.actual_price }));
+        .map((p) => ({ x: toTimeValue(p.date), y: p.actual_price }));
 
     const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
-    const forecastData = forecastSlice.map((p) => ({ x: p.date, y: p.simulated_price || 0 }));
+    const forecastData = forecastSlice.map((p) => ({ x: toTimeValue(p.date), y: p.simulated_price || 0 }));
 
     const predictionBackgroundPlugin = buildPredictionBackgroundPlugin();
     const splitBandPlugin = buildSplitBandPlugin();
@@ -268,7 +282,10 @@ export function initializeChart() {
                 {
                     label: 'Forecast',
                     data: forecastData,
-                    borderColor: 'rgba(50, 50, 50, 0.9)',
+                    // The forecast line must be visible on a dark background.
+                    // We use the project's gold accent and a dashed stroke so it
+                    // can't be confused with the white "Actual Price" line.
+                    borderColor: 'rgba(247, 183, 49, 0.85)',
                     backgroundColor: 'transparent',
                     fill: false,
                     tension: 0.1,
@@ -277,6 +294,7 @@ export function initializeChart() {
                     pointStyle: false,
                     pointHitRadius: 10,
                     borderWidth: 2,
+                    borderDash: [7, 5],
                     order: 0,
                 },
             ],
@@ -326,9 +344,8 @@ export function initializeChart() {
                             }
 
                             if (label === 'Actual Price') {
-                                // Prefer the original x value (string) to avoid timezone shifts.
-                                const rawX = context.raw?.x;
-                                const dateStr = typeof rawX === 'string' ? rawX : toIsoDateUTC(new Date(context.parsed.x));
+                                // Prefer a local ISO date string so it matches our `backtestByDate` keys.
+                                const dateStr = toIsoDateLocal(new Date(context.parsed.x));
                                 const row = state.backtestByDate.get(dateStr);
                                 const lines = [`Actual: $${value.toLocaleString()}`];
 

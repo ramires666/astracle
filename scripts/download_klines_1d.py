@@ -89,8 +89,8 @@ def main() -> int:
     parser.add_argument(
         "--check-db",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Check local DB cache before downloading",
+        default=False,
+        help="Check local DB cache before downloading (default: false, parquet-only workflow)",
     )
     parser.add_argument(
         "--force",

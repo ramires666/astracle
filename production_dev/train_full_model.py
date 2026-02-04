@@ -98,33 +98,20 @@ def _load_market_data_with_fallback(
     """
     Load market data (date, close).
 
-    Preferred source:
-    - PostgreSQL via `RESEARCH.data_loader.load_market_data`
+    IMPORTANT CHANGE (project decision):
+    - We NO LONGER use the database at all.
+    - The single source of truth is the local parquet:
+      `data/market/processed/BTC_full_market_daily.parquet`
 
-    Fallback source (for local development):
-    - `data/market/processed/BTC_full_market_daily.parquet`
-
-    We keep this logic here (inside production_dev) so RESEARCH stays "pure"
-    and focused on database-first research workflows.
+    Reason:
+    - DB and parquet can drift out of sync, which breaks reproducibility.
+    - Parquet is deterministic and version-controlled with the repo data pipeline.
     """
-    # 1) Try DB first (this is what production expects)
-    try:
-        from RESEARCH.data_loader import load_market_data
-
-        df = load_market_data(start_date=start_date, end_date=end_date)
-        df = df[["date", "close"]].copy()
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-        return df
-    except Exception as e:
-        print("⚠️ Could not load market data from DB. Falling back to local file.")
-        print(f"   DB error: {e}")
-
-    # 2) Fallback to local parquet
+    # Load from local parquet only.
     if not LOCAL_MARKET_FALLBACK.exists():
         raise FileNotFoundError(
-            f"Local market fallback file not found: {LOCAL_MARKET_FALLBACK}. "
-            "Either configure the DB connection or provide a local parquet."
+            f"Local market parquet not found: {LOCAL_MARKET_FALLBACK}. "
+            "Run scripts/merge_btc_ohlcv.py to build it."
         )
 
     df = pd.read_parquet(LOCAL_MARKET_FALLBACK)
