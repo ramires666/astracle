@@ -2,7 +2,7 @@
 Generate Prediction Cache
 
 Pre-calculates predictions for:
-- Backtest: Past 6 months (with actual prices for accuracy)
+- Backtest: Full research period (train/val/test) with honest labels
 - Forecast: Future 1 year
 
 Run this script once or periodically to update the cache:
@@ -27,62 +27,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from production_dev.predictor import BtcAstroPredictor
 from production_dev.cache_service import (
     save_predictions_to_cache,
-    BACKTEST_DAYS,
     FORECAST_DAYS,
     ensure_cache_dir,
 )
-
-
-def generate_backtest_predictions(
-    predictor: BtcAstroPredictor,
-    days: int = BACKTEST_DAYS,
-) -> List[Dict]:
-    """
-    Generate predictions for past dates (backtest).
-    
-    Args:
-        predictor: Loaded BtcAstroPredictor instance
-        days: Number of past days to generate
-        
-    Returns:
-        List of prediction dictionaries
-    """
-    print(f"\n📊 Generating {days} days of BACKTEST predictions...")
-    
-    predictions = []
-    end_date = date.today() - timedelta(days=1)  # Yesterday
-    start_date = end_date - timedelta(days=days)
-    
-    current_date = start_date
-    
-    with tqdm(total=days, desc="Backtest", unit="day") as pbar:
-        while current_date <= end_date:
-            try:
-                direction_code, confidence = predictor.predict_direction(current_date)
-                
-                predictions.append({
-                    "date": current_date.isoformat(),
-                    "direction": "UP" if direction_code == 1 else "DOWN",
-                    "direction_code": direction_code,
-                    "confidence": round(confidence, 4),
-                })
-                
-            except Exception as e:
-                print(f"\n⚠️ Error for {current_date}: {e}")
-                # Add placeholder for failed predictions
-                predictions.append({
-                    "date": current_date.isoformat(),
-                    "direction": "UNKNOWN",
-                    "direction_code": -1,
-                    "confidence": 0.0,
-                    "error": str(e),
-                })
-            
-            current_date += timedelta(days=1)
-            pbar.update(1)
-    
-    print(f"✅ Generated {len(predictions)} backtest predictions")
-    return predictions
+from production_dev.backtest_cache_builder import build_split_model_backtest_cache
 
 
 def generate_forecast_predictions(
@@ -146,51 +94,6 @@ def generate_forecast_predictions(
     return predictions
 
 
-def load_historical_prices() -> pd.DataFrame:
-    """Load historical prices from database for backtest accuracy."""
-    try:
-        from RESEARCH.data_loader import load_market_data
-        
-        df = load_market_data()
-        # Ensure date column is datetime
-        df["date"] = pd.to_datetime(df["date"])
-        
-        # Keep only last 3 years for efficiency (matches backtest range)
-        cutoff = pd.Timestamp.now() - pd.Timedelta(days=1100)
-        df = df[df["date"] >= cutoff].copy()
-        
-        print(f"📈 Loaded {len(df)} historical prices")
-        return df
-        
-    except Exception as e:
-        print(f"⚠️ Could not load historical prices: {e}")
-        import traceback
-        traceback.print_exc()
-
-    # ---------------------------------------------------------------------
-    # Fallback: local parquet (dev-friendly)
-    # ---------------------------------------------------------------------
-    # In many dev setups the PostgreSQL database is not running, but we still
-    # want to be able to regenerate the cache and see the dashboard working.
-    #
-    # This local file is already part of the repo and contains daily closes.
-    fallback_path = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
-    if fallback_path.exists():
-        try:
-            df = pd.read_parquet(fallback_path)
-            df["date"] = pd.to_datetime(df["date"])
-
-            cutoff = pd.Timestamp.now() - pd.Timedelta(days=1100)
-            df = df[df["date"] >= cutoff].copy()
-
-            print(f"📈 Loaded {len(df)} historical prices from local fallback: {fallback_path}")
-            return df
-        except Exception as e2:
-            print(f"⚠️ Local price fallback failed: {e2}")
-
-    return pd.DataFrame()
-
-
 def main():
     """Main cache generation function."""
     print("=" * 60)
@@ -208,28 +111,33 @@ def main():
     # =========================================
     # BACKTEST: Use split model (honest accuracy)
     # =========================================
-    print("\n📦 Loading SPLIT model for backtest...")
-    backtest_predictor = BtcAstroPredictor(model_path=SPLIT_MODEL)
-    
-    if not backtest_predictor.load_model():
-        print("❌ ERROR: Could not load split model.")
-        sys.exit(1)
-    
-    print(f"✅ Backtest model loaded: {backtest_predictor.config.get('birth_date')}")
-    print(f"   Features: {len(backtest_predictor.feature_names)}")
-    
-    # Load historical prices for backtest
-    historical_prices = load_historical_prices()
-    
-    # Generate backtest predictions
-    backtest = generate_backtest_predictions(backtest_predictor, days=BACKTEST_DAYS)
-    
-    # Save backtest with actual prices
-    save_predictions_to_cache(
-        backtest, 
-        "backtest",
-        actual_prices=historical_prices if len(historical_prices) > 0 else None,
-    )
+    print("\n📦 Building research-exact BACKTEST cache (split model)...")
+
+    # We build the backtest cache using the exact research pipeline:
+    # - forward-filled labels (the same "target" used in the notebook)
+    # - validation-tuned threshold (recall_min)
+    # - explicit split tags (train/val/test) for honest chart labeling
+    try:
+        backtest_result = build_split_model_backtest_cache(
+            split_model_path=SPLIT_MODEL,
+            start_date="2017-11-01",
+        )
+    except Exception as e:
+        print("❌ ERROR: Failed to build backtest cache.")
+        print(f"   Reason: {e}")
+        raise
+
+    backtest_df = backtest_result.df_backtest
+    backtest = backtest_df.to_dict(orient="records")
+
+    # Save as-is. We do NOT merge with next-day price movement because
+    # that would not match the notebook labels/metrics.
+    save_predictions_to_cache(backtest, "backtest", actual_prices=None)
+
+    print("✅ Backtest cache built")
+    print(f"   Rows: {len(backtest_df)}")
+    print(f"   Range: {backtest_result.meta.get('start_date')} -> {backtest_result.meta.get('end_date')}")
+    print(f"   Threshold: {backtest_result.meta.get('decision_threshold')}")
     
     # =========================================
     # FORECAST: Use full model (best predictions)
@@ -256,16 +164,53 @@ def main():
     print("\n" + "=" * 60)
     print("✅ CACHE GENERATION COMPLETE")
     print("=" * 60)
-    print(f"   Backtest: {len(backtest)} days (split model)")
+    print(f"   Backtest: {len(backtest)} days (split model, full history)")
     print(f"   Forecast: {len(forecast)} days (full model)")
     print(f"   Location: {cache_dir}")
     
     # Quick accuracy check
-    if len(historical_prices) > 0:
-        from production_dev.cache_service import get_backtest_with_accuracy
-        _, stats = get_backtest_with_accuracy()
-        print(f"\n📊 Backtest Accuracy: {stats['accuracy']:.1%}")
+    from production_dev.cache_service import get_backtest_with_accuracy
+    _df, stats = get_backtest_with_accuracy(days=None)
+    if stats.get("total", 0) > 0:
+        print(f"\n📊 Backtest (TEST split) Accuracy: {stats['accuracy']:.1%}")
+        if "r_min" in stats:
+            print(f"   TEST R_MIN: {stats['r_min']:.3f}")
+        if "mcc" in stats:
+            print(f"   TEST MCC:   {stats['mcc']:.3f}")
         print(f"   Total: {stats['total']}, Correct: {stats['correct']}")
+
+        # -----------------------------------------------------------------
+        # Consistency check: cache metrics vs artifact metrics
+        # -----------------------------------------------------------------
+        # User expectation (explicit requirement):
+        # - The dashboard history must match the notebook metrics.
+        #
+        # If this check fails, the #1 reason is: the market dataset changed
+        # after the split artifact was exported (new rows added, prices differ, etc).
+        try:
+            import joblib
+
+            artifact = joblib.load(SPLIT_MODEL)
+            expected_cfg = artifact.get("config", {}) if isinstance(artifact, dict) else {}
+            exp_r_min = expected_cfg.get("r_min")
+            exp_mcc = expected_cfg.get("mcc")
+
+            if exp_r_min is not None and exp_mcc is not None and "r_min" in stats and "mcc" in stats:
+                dr = abs(float(exp_r_min) - float(stats["r_min"]))
+                dm = abs(float(exp_mcc) - float(stats["mcc"]))
+                print(f"\n🔎 Notebook (artifact) metrics: R_MIN={float(exp_r_min):.3f} MCC={float(exp_mcc):.3f}")
+                print(f"   Delta vs cache (TEST):       |dR_MIN|={dr:.3f} |dMCC|={dm:.3f}")
+
+                # Loose threshold: enough to catch major mismatches without being too noisy.
+                if dr > 0.03 or dm > 0.03:
+                    print("⚠️ WARNING: Cache metrics do not match artifact metrics.")
+                    print("   Common reasons:")
+                    print("   - DB market data has new rows after the model export (split boundaries shifted)")
+                    print("   - Local parquet fallback differs from the DB data used in the notebook")
+                    print("   - Different start/end date than the notebook used")
+        except Exception as _e:
+            # Cache generation must not fail just because of a debug check.
+            pass
 
 
 if __name__ == "__main__":

@@ -175,12 +175,22 @@ def _build_full_training_dataset(
     # ---------------------------------------------------------------------
     # 1) Labels (target)
     # ---------------------------------------------------------------------
-    # The notebook uses Gaussian detrending + balanced selection.
-    # We keep the SAME gauss_window / gauss_std as in the split model config.
+    # The research notebook (birthdate_deep_search.ipynb) calls:
+    #   create_balanced_labels(df_market, ASTRO_CONFIG["gauss_window"], ASTRO_CONFIG["gauss_std"])
+    #
+    # With the CURRENT function signature, those positional arguments map to:
+    #   horizon = gauss_window
+    #   move_share = gauss_std
+    #
+    # This is confusing naming, but it is what the exported split model
+    # was trained on, and we must keep FULL model training consistent with it.
+    #
+    # We intentionally do NOT pass `gauss_window` / `gauss_std` keyword args here,
+    # so the labeling detrending uses the default values from `configs/labels.yaml`.
     df_labels = create_balanced_labels(
         df_market,
-        gauss_window=cfg.get("gauss_window"),
-        gauss_std=cfg.get("gauss_std"),
+        horizon=cfg.get("gauss_window"),
+        move_share=cfg.get("gauss_std"),
         verbose=True,
     )
 
@@ -258,8 +268,14 @@ def _build_full_training_dataset(
         # Missing features are filled with 0.0 (means "feature not active")
         # This is safe because the research pipeline also uses 0 for inactive aspects.
         print(f"⚠️ FULL dataset is missing {len(missing)} split features. Filling with zeros.")
-        for c in missing:
-            df_dataset[c] = 0.0
+
+        # IMPORTANT PERFORMANCE NOTE:
+        # Adding thousands of columns one-by-one makes pandas create a highly
+        # fragmented dataframe (slow and memory-heavy).
+        #
+        # Instead, we create one "zero block" dataframe and concat once.
+        zero_block = pd.DataFrame(0.0, index=df_dataset.index, columns=missing)
+        df_dataset = pd.concat([df_dataset, zero_block], axis=1)
 
     if extra:
         # Extra features can appear if we build features on a different date range.
@@ -396,4 +412,3 @@ def train_final_model(
 
 if __name__ == "__main__":
     train_final_model()
-

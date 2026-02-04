@@ -2,7 +2,7 @@
 Prediction Cache Service
 
 Manages cached predictions stored in parquet files for fast loading.
-- Backtest: Past 6 months of predictions with actual results
+- Backtest: Research-exact history (full period) with train/val/test tags
 - Forecast: Future 1 year of predictions
 
 This avoids recalculating expensive ephemeris calculations on every request.
@@ -15,6 +15,8 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List, Dict, Tuple
 import pandas as pd
 import numpy as np
+
+from production_dev.backtest_stats import compute_backtest_stats
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -32,7 +34,9 @@ CACHE_FILES = {
 }
 
 # Time ranges
-BACKTEST_DAYS = 1095   # 3 years of past predictions
+# Historical range is stored fully in the cache file.
+# The UI can still *display* the last N days, but that slicing happens on the client.
+BACKTEST_DAYS = 1095   # Legacy default (kept for UI slider defaults)
 FORECAST_DAYS = 365   # 1 year of future predictions
 
 
@@ -248,7 +252,7 @@ def merge_with_actual_prices(
 
 
 def get_backtest_with_accuracy(
-    days: int = BACKTEST_DAYS,
+    days: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, Dict]:
     """
     Get backtest predictions with accuracy statistics.
@@ -261,43 +265,13 @@ def get_backtest_with_accuracy(
     if df is None or len(df) == 0:
         return pd.DataFrame(), {"accuracy": 0, "total": 0, "correct": 0}
     
-    # Filter to requested days
-    cutoff_date = datetime.now() - timedelta(days=days)
-    df = df[df["date"] >= cutoff_date].copy()
-    
-    # Default stats if 'correct' column doesn't exist
-    stats = {
-        "total": 0,
-        "correct": 0,
-        "accuracy": 0,
-        "up_accuracy": 0,
-        "down_accuracy": 0,
-    }
-    
-    # Only calculate accuracy if 'correct' column exists
-    if "correct" in df.columns:
-        valid_rows = df[df["correct"].notna()].copy()
-        total = len(valid_rows)
-        correct = valid_rows["correct"].sum() if total > 0 else 0
-        accuracy = correct / total if total > 0 else 0
-        
-        stats = {
-            "total": int(total),
-            "correct": int(correct),
-            "accuracy": round(float(accuracy), 4),
-            "up_accuracy": 0,
-            "down_accuracy": 0,
-        }
-        
-        # Calculate per-direction accuracy
-        if total > 0:
-            up_preds = valid_rows[valid_rows["direction"] == "UP"]
-            down_preds = valid_rows[valid_rows["direction"] == "DOWN"]
-            
-            if len(up_preds) > 0:
-                stats["up_accuracy"] = round(up_preds["correct"].mean(), 4)
-            if len(down_preds) > 0:
-                stats["down_accuracy"] = round(down_preds["correct"].mean(), 4)
+    # Optional filter: "last N days"
+    # We keep this mainly for debugging. The UI usually slices on the client.
+    if days is not None:
+        cutoff_date = datetime.now() - timedelta(days=int(days))
+        df = df[df["date"] >= cutoff_date].copy()
+
+    stats = compute_backtest_stats(df)
     
     return df, stats
 
@@ -315,6 +289,11 @@ def df_to_backtest_list(df: pd.DataFrame) -> List[Dict]:
             "direction": row["direction"],
             "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
         }
+        # New cache format: include split tag for honest UI labeling.
+        if "split" in row.index:
+            item["split"] = row["split"] if pd.notna(row.get("split")) else None
+        else:
+            item["split"] = None
         # Optional columns (may not exist if actual prices weren't merged)
         if "actual_price" in row.index:
             item["actual_price"] = float(row["actual_price"]) if pd.notna(row["actual_price"]) else None

@@ -91,10 +91,22 @@ def _build_dataset(df_market: pd.DataFrame, cfg: Dict) -> pd.DataFrame:
     from RESEARCH.features import build_full_features, merge_features_with_labels
 
     # 1) Labels (target)
+    #
+    # IMPORTANT: Notebook-exact behavior
+    # The research notebook calls:
+    #   create_balanced_labels(df_market, ASTRO_CONFIG["gauss_window"], ASTRO_CONFIG["gauss_std"])
+    #
+    # With the current function signature, those positional arguments map to:
+    # - horizon    = gauss_window
+    # - move_share = gauss_std
+    #
+    # The naming is confusing, but this is what the exported split model
+    # was trained on, so this validation script must do the same to match
+    # the artifact metrics.
     df_labels = create_balanced_labels(
         df_market,
-        gauss_window=cfg.get("gauss_window"),
-        gauss_std=cfg.get("gauss_std"),
+        horizon=cfg.get("gauss_window"),
+        move_share=cfg.get("gauss_std"),
         verbose=True,
     )
 
@@ -282,4 +294,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

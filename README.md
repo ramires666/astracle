@@ -312,12 +312,16 @@ ostrofun/
 │   ├── generate_cache.py       # 🆕 Dual-model cache generator
 │   ├── train_full_model.py     # 🆕 Full model training script
 │   ├── daily_retrain.py        # 🆕 Daily retraining automation
+│   ├── backtest_cache_builder.py  # 🆕 Builds research-exact backtest cache
+│   ├── backtest_stats.py       # 🆕 Computes honest test metrics for UI
 │   ├── data_service.py         # Database data fetching
 │   ├── schemas.py              # API request/response models
 │   ├── static/                 # Web UI files
 │   │   ├── index.html          # Main page
-│   │   ├── styles.css          # Styling
-│   │   └── app.js              # Frontend logic
+│   │   ├── styles.css          # CSS entry point (imports smaller files)
+│   │   ├── css/                # Split CSS files (<=500 lines each)
+│   │   ├── app.js              # JS entry point (ES module)
+│   │   └── js/                 # Split JS modules (<=500 lines each)
 │   ├── Dockerfile              # Docker build instructions
 │   ├── docker-compose.yml      # Docker deployment config
 │   └── requirements.txt        # Python dependencies
