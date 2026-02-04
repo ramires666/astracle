@@ -27,6 +27,7 @@ from .features import get_feature_columns
 def compute_stronger_weights(
     y: np.ndarray,
     power: float = 2.0,
+    sideways_penalty: float = 1.0,  # NEW: Multiplier for SIDEWAYS (class 1) weight
 ) -> np.ndarray:
     """
     ═══════════════════════════════════════════════════════════════════════════════
@@ -85,7 +86,18 @@ def compute_stronger_weights(
     stronger_weights = base_weights ** power
     
     # ─────────────────────────────────────────────────────────────────────────────
-    # Step 4: Normalize so mean weight = 1.0 (optional but good practice)
+    # Step 4: Apply SIDEWAYS penalty (reduce weight for class 1)
+    # This prevents the model from "hiding" in SIDEWAYS predictions
+    # sideways_penalty=0.3 means SIDEWAYS samples have 30% of their normal weight
+    # ─────────────────────────────────────────────────────────────────────────────
+    if n_classes >= 3 and sideways_penalty != 1.0:
+        # Class 1 is SIDEWAYS in our ternary scheme (0=DOWN, 1=SIDEWAYS, 2=UP)
+        sideways_idx = np.where(classes == 1)[0]
+        if len(sideways_idx) > 0:
+            stronger_weights[sideways_idx[0]] *= sideways_penalty
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Step 5: Normalize so mean weight = 1.0 (optional but good practice)
     # ─────────────────────────────────────────────────────────────────────────────
     # This keeps the effective sample size similar to original
     weight_map = dict(zip(classes, stronger_weights))
@@ -264,6 +276,7 @@ def train_xgb_model(
     n_classes: int = 2,
     device: str = "cpu",
     weight_power: float = 1.0,
+    sideways_penalty: float = 1.0,  # NEW: Reduce SIDEWAYS weight (0.3 = -70%)
     **model_params,
 ) -> XGBBaseline:
     """
@@ -278,6 +291,9 @@ def train_xgb_model(
         weight_power: Power for sample weight amplification (default: 1.0)
                       1.0 = standard balanced weights
                       2.0 = stronger weights for minority classes (good for 3+ classes)
+        sideways_penalty: Multiplier for SIDEWAYS (class 1) weight (default: 1.0)
+                          1.0 = no change
+                          0.3 = reduce by 70% (use if model hides in SIDEWAYS)
         **model_params: Additional XGBoost parameters
     
     Returns:
@@ -288,14 +304,14 @@ def train_xgb_model(
     # For 3+ classes, use stronger weights to prevent model from predicting
     # only the "easy" middle class (SIDEWAYS)
     # ─────────────────────────────────────────────────────────────────────────────
-    if weight_power == 1.0:
+    if weight_power == 1.0 and sideways_penalty == 1.0:
         # Standard sklearn balanced weights
         w_train = compute_sample_weight(class_weight="balanced", y=y_train)
         w_val = compute_sample_weight(class_weight="balanced", y=y_val)
     else:
-        # Stronger weights for minority classes
-        w_train = compute_stronger_weights(y_train, power=weight_power)
-        w_val = compute_stronger_weights(y_val, power=weight_power)
+        # Stronger weights for minority classes with optional SIDEWAYS penalty
+        w_train = compute_stronger_weights(y_train, power=weight_power, sideways_penalty=sideways_penalty)
+        w_val = compute_stronger_weights(y_val, power=weight_power, sideways_penalty=sideways_penalty)
     
     # Default params
     params = {

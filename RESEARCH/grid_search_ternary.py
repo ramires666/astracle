@@ -128,12 +128,13 @@ FEATURE_GRID = {
 # MODEL HYPERPARAMETERS GRID
 # ─────────────────────────────────────────────────────────────────────────────────
 MODEL_GRID = {
-    "max_depth": [3, 5,9],           # Tree depth
+    "max_depth": [3, 5, 9],              # Tree depth
     "learning_rate": [0.01, 0.03, 0.05], # Step size
-    "weight_power": [1.5, 2.0, 2.5],  # Minority class amplification
-    "n_estimators": [500],            # Fixed number of trees
-    "subsample": [0.8],               # Fixed
-    "colsample_bytree": [0.8],        # Fixed
+    "weight_power": [2.0],               # Fixed at 2.0 (strong minority boost)
+    "sideways_penalty": [0.3, 0.5, 1.0], # NEW: reduce SIDEWAYS weight (0.3 = -70%)
+    "n_estimators": [500],               # Fixed number of trees
+    "subsample": [0.8],                  # Fixed
+    "colsample_bytree": [0.8],           # Fixed
 }
 
 # ─────────────────────────────────────────────────────────────────────────────────
