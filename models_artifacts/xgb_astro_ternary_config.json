@@ -1,0 +1,18 @@
+{
+  "label_config": {
+    "horizon": 1,
+    "gauss_window": 201,
+    "gauss_std": 50.0,
+    "price_mode": "raw",
+    "balance_classes": true
+  },
+  "orb_multiplier": 1.0,
+  "model_params": {
+    "n_estimators": 500,
+    "max_depth": 4,
+    "learning_rate": 0.03,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "data_start": "2017-11-01"
+}

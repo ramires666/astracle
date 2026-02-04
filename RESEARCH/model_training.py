@@ -20,6 +20,83 @@ from src.models.xgb import XGBBaseline
 from .features import get_feature_columns
 
 
+# ===================================================================================
+# SAMPLE WEIGHT FUNCTIONS FOR CLASS BALANCING
+# ===================================================================================
+
+def compute_stronger_weights(
+    y: np.ndarray,
+    power: float = 2.0,
+) -> np.ndarray:
+    """
+    ═══════════════════════════════════════════════════════════════════════════════
+    COMPUTE STRONGER SAMPLE WEIGHTS FOR MINORITY CLASSES
+    ═══════════════════════════════════════════════════════════════════════════════
+    
+    Standard balanced weights often aren't enough for 3+ class problems where
+    the model tends to predict the "easy" middle class (SIDEWAYS).
+    
+    This function uses POWER to amplify the difference:
+    
+    FORMULA:
+        base_weight[class] = n_samples / (n_classes * class_count)
+        stronger_weight[class] = base_weight[class] ** power
+    
+    POWER VALUES:
+        1.0 = Same as sklearn's balanced weights
+        1.5 = Moderate amplification
+        2.0 = Strong amplification (RECOMMENDED for ternary)
+        3.0 = Very aggressive (use if model still ignores minority)
+    
+    EXAMPLE (1000 samples, 3 classes):
+        Class counts: DOWN=200, SIDEWAYS=600, UP=200
+        
+        Power=1.0 (balanced):
+            DOWN=1.67, SIDEWAYS=0.56, UP=1.67
+        
+        Power=2.0 (stronger):
+            DOWN=2.78, SIDEWAYS=0.31, UP=2.78
+            → DOWN/UP samples weighted ~9x more than SIDEWAYS!
+    
+    Args:
+        y: Array of class labels (0, 1, 2 for ternary)
+        power: Exponent for weight amplification (default: 2.0)
+    
+    Returns:
+        Array of sample weights, same length as y
+    ═══════════════════════════════════════════════════════════════════════════════
+    """
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Step 1: Count samples per class
+    # ─────────────────────────────────────────────────────────────────────────────
+    classes, counts = np.unique(y, return_counts=True)
+    n_samples = len(y)
+    n_classes = len(classes)
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Step 2: Calculate base weight = n / (n_classes * count_per_class)
+    # This is the same formula sklearn uses for "balanced"
+    # ─────────────────────────────────────────────────────────────────────────────
+    base_weights = n_samples / (n_classes * counts)
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Step 3: Apply power to amplify minority class weights
+    # ─────────────────────────────────────────────────────────────────────────────
+    stronger_weights = base_weights ** power
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Step 4: Normalize so mean weight = 1.0 (optional but good practice)
+    # ─────────────────────────────────────────────────────────────────────────────
+    # This keeps the effective sample size similar to original
+    weight_map = dict(zip(classes, stronger_weights))
+    sample_weights = np.array([weight_map[yi] for yi in y])
+    
+    # Normalize to mean=1
+    sample_weights = sample_weights / sample_weights.mean()
+    
+    return sample_weights
+
+
 def split_dataset(
     df: pd.DataFrame,
     train_ratio: float = 0.7,
@@ -186,6 +263,7 @@ def train_xgb_model(
     feature_names: List[str],
     n_classes: int = 2,
     device: str = "cpu",
+    weight_power: float = 1.0,
     **model_params,
 ) -> XGBBaseline:
     """
@@ -195,16 +273,29 @@ def train_xgb_model(
         X_train, y_train: Training data
         X_val, y_val: Validation data
         feature_names: Feature column names
-        n_classes: Number of classes
+        n_classes: Number of classes (2=binary, 3=ternary)
         device: 'cpu' or 'cuda'
+        weight_power: Power for sample weight amplification (default: 1.0)
+                      1.0 = standard balanced weights
+                      2.0 = stronger weights for minority classes (good for 3+ classes)
         **model_params: Additional XGBoost parameters
     
     Returns:
         Trained XGBBaseline model
     """
+    # ─────────────────────────────────────────────────────────────────────────────
     # Compute sample weights
-    w_train = compute_sample_weight(class_weight="balanced", y=y_train)
-    w_val = compute_sample_weight(class_weight="balanced", y=y_val)
+    # For 3+ classes, use stronger weights to prevent model from predicting
+    # only the "easy" middle class (SIDEWAYS)
+    # ─────────────────────────────────────────────────────────────────────────────
+    if weight_power == 1.0:
+        # Standard sklearn balanced weights
+        w_train = compute_sample_weight(class_weight="balanced", y=y_train)
+        w_val = compute_sample_weight(class_weight="balanced", y=y_val)
+    else:
+        # Stronger weights for minority classes
+        w_train = compute_stronger_weights(y_train, power=weight_power)
+        w_val = compute_stronger_weights(y_val, power=weight_power)
     
     # Default params
     params = {

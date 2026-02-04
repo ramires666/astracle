@@ -99,6 +99,7 @@ from RESEARCH.labeling import create_ternary_labels, get_ternary_label_stats
 from RESEARCH.astro_engine import (
     init_ephemeris,
     calculate_bodies_for_dates,
+    calculate_bodies_for_dates_multi,  # NEW: for helio+geo coordinates
     calculate_aspects_for_dates,
     calculate_phases_for_dates,
 )
@@ -383,8 +384,16 @@ print(f"Aspects: {[a.name for a in settings.aspects]}")
 
 # Cache key
 date_range = f"{df_market['date'].min().date()}_{df_market['date'].max().date()}"
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# NEW: Use coord_mode='both' for GEO + HELIO coordinates!
+# This gives us features like: geo_Sun_lon, helio_Mars_lon, etc.
+# Heliocentric (Sun-centered) view is common in financial astrology.
+# ═══════════════════════════════════════════════════════════════════════════════════
+COORD_MODE = "both"  # 'geo', 'helio', or 'both'
+
 BODIES_CACHE_PARAMS = {
-    "coord_mode": "geo",  # Geocentric (Earth-centered)
+    "coord_mode": COORD_MODE,
     "date_range": date_range,
 }
 
@@ -392,22 +401,28 @@ cached_bodies = load_cache("astro", "bodies", BODIES_CACHE_PARAMS, verbose=True)
 
 if cached_bodies is not None:
     df_bodies = cached_bodies
-    # Need to also load bodies_by_date for phases/aspects
-    # Since bodies_by_date is a dict, we use pickle
-    bodies_by_date = load_cache("astro", "bodies_dict", BODIES_CACHE_PARAMS, verbose=False)
+    # Also load geo_by_date for aspects/phases calculation
+    geo_by_date = load_cache("astro", "bodies_geo_dict", BODIES_CACHE_PARAMS, verbose=False)
+    helio_by_date = load_cache("astro", "bodies_helio_dict", BODIES_CACHE_PARAMS, verbose=False)
+    bodies_by_date = geo_by_date  # Use geo for aspects and phases
 else:
-    print("Calculating planet positions...")
-    df_bodies, bodies_by_date = calculate_bodies_for_dates(
+    print(f"Calculating planet positions (coord_mode={COORD_MODE})...")
+    df_bodies, geo_by_date, helio_by_date = calculate_bodies_for_dates_multi(
         df_market["date"],
         settings,
+        coord_mode=COORD_MODE,
         progress=True,
     )
+    bodies_by_date = geo_by_date  # Use geo for aspects calculation
     
-    # Cache both
+    # Cache all
     save_cache(df_bodies, "astro", "bodies", BODIES_CACHE_PARAMS)
-    save_cache(bodies_by_date, "astro", "bodies_dict", BODIES_CACHE_PARAMS)
+    save_cache(geo_by_date, "astro", "bodies_geo_dict", BODIES_CACHE_PARAMS)
+    if helio_by_date:
+        save_cache(helio_by_date, "astro", "bodies_helio_dict", BODIES_CACHE_PARAMS)
 
 print(f"\nBodies calculated: {len(df_bodies)} rows")
+print(f"Bodies columns: {len([c for c in df_bodies.columns if c != 'date'])} features")
 df_bodies.head()
 
 # %%
@@ -730,12 +745,20 @@ print(f"X_test:  {X_test.shape}, y_test:  {y_test.shape}")
 
 print("Training XGBoost model (3 classes)...")
 
+# ═══════════════════════════════════════════════════════════════════════════════════
+# KEY: weight_power=2.0 for stronger minority class weighting!
+# This prevents the model from predicting only SIDEWAYS class.
+# Standard balanced weights (power=1.0) often aren't enough for 3+ classes.
+# ═══════════════════════════════════════════════════════════════════════════════════
+WEIGHT_POWER = 2.0  # 1.0=standard, 2.0=stronger (recommended for ternary)
+
 model = train_xgb_model(
     X_train, y_train,
     X_val, y_val,
     feature_cols,
     n_classes=3,  # TERNARY: 3 classes instead of 2!
     device=device,
+    weight_power=WEIGHT_POWER,  # NEW: stronger sample weights
     **MODEL_PARAMS,
 )
 
@@ -749,10 +772,15 @@ print("✓ Model trained")
 # PREDICT ON TEST SET
 # ═══════════════════════════════════════════════════════════════════════════════════
 # For 3 classes, we pick the class with highest probability.
+# Note: model is a wrapper, we need model.model for predict_proba
+#       and model.scaler to scale the data first.
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-# Get class probabilities
-y_proba = model.predict_proba(X_test)
+# Scale features using the same scaler used in training
+X_test_scaled = model.scaler.transform(X_test)
+
+# Get class probabilities from the inner XGBoost model
+y_proba = model.model.predict_proba(X_test_scaled)
 
 # Pick class with highest probability
 y_pred = y_proba.argmax(axis=1)
