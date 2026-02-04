@@ -531,9 +531,12 @@ def evaluate_and_visualize_model(
     print(classification_report(y_test, y_pred, target_names=CLASS_NAMES, zero_division=0))
     
     # ─────────────────────────────────────────────────────────────────────────────
-    # Create figure with 3 subplots
+    # Create figure with 3 subplots (WHITE background for better readability)
     # ─────────────────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(3, 1, figsize=(14, 12))
+    plt.style.use('default')  # White background
+    fig, axes = plt.subplots(3, 1, figsize=(14, 12), facecolor='white')
+    for ax in axes:
+        ax.set_facecolor('white')
     
     # ─────────────────────────────────────────────────────────────────────────────
     # Subplot 1: Confusion Matrix
@@ -806,6 +809,17 @@ print(f"   Params: {best_params_str}")
 
 df_results = pd.DataFrame(results)
 
+# ═══════════════════════════════════════════════════════════════════════════════════
+# SORT BY UP/DOWN BALANCE (primary metric for trading!)
+# ═══════════════════════════════════════════════════════════════════════════════════
+# This sorting affects ALL subsequent cells that use df_results.iloc[0]
+if not df_results.empty and "up_down_min" in df_results.columns:
+    df_results = df_results.sort_values(
+        ["up_down_min", "up_down_gap"], 
+        ascending=[False, True]
+    ).reset_index(drop=True)
+    print(f"\n✓ Results sorted by UP/DOWN balance. Best up_down_min: {df_results['up_down_min'].iloc[0]:.3f}")
+
 if not df_results.empty:
     # ─────────────────────────────────────────────────────────────────────────────
     # TOP 10 BY UP/DOWN BALANCE (most important for trading!)
@@ -871,14 +885,19 @@ if not df_results.empty:
 
 # %%
 # ═══════════════════════════════════════════════════════════════════════════════════
-# BEST PARAMETERS SUMMARY
+# BEST PARAMETERS SUMMARY (using UP/DOWN BALANCE as primary metric!)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 if not df_results.empty:
-    best = df_results.iloc[0]
+    # Sort by UP/DOWN balance (NOT by bal_acc!)
+    df_best = df_results.sort_values(
+        ["up_down_min", "up_down_gap"], 
+        ascending=[False, True]
+    )
+    best = df_best.iloc[0]
     
     print("\n" + "=" * 80)
-    print("BEST CONFIGURATION")
+    print("🏆 BEST CONFIGURATION (by UP/DOWN balance)")
     print("=" * 80)
     
     print("\nLabeling Parameters:")
