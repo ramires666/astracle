@@ -1,0 +1,3 @@
+"""
+Astro XGBoost pipeline package.
+"""
