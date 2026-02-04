@@ -1,0 +1,8 @@
+{
+  "subject_id": "btc",
+  "start_date": "2017-11-01",
+  "type": "ternary",
+  "horizon": 1,
+  "gauss_window": 101,
+  "gauss_std": 25.0
+}
