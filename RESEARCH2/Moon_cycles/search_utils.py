@@ -1,13 +1,4 @@
-"""
-Training and Gaussian-search helpers for Moon-cycle research.
-
-This module glues together:
-- moon-only dataset creation,
-- split protocols,
-- XGBoost training + threshold tuning,
-- baseline (pre-training) checks,
-- cached experiment results.
-"""
+"""Training and Gaussian-search helpers for Moon-cycle research."""
 
 from __future__ import annotations
 
@@ -34,6 +25,7 @@ from .eval_utils import (
     make_majority_baseline,
 )
 from .moon_data import MoonLabelConfig, build_moon_dataset_for_gauss, get_moon_feature_columns
+from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
 from .splits import (
     SplitDefinition,
     describe_split,
@@ -52,6 +44,8 @@ class XgbConfig:
     colsample_bytree: float = 0.8
     subsample: float = 0.8
     early_stopping_rounds: int = 50
+    threshold_gap_penalty: float = 0.25
+    threshold_prior_penalty: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -61,21 +55,6 @@ class WalkForwardConfig:
     warmup_ratio: float = 0.50
     block_ratios: tuple[float, ...] = (0.10, 0.10, 0.10, 0.10, 0.10)
     val_fraction_inside_block: float = 0.50
-
-
-def _predict_proba_up_safe(model, X: np.ndarray) -> np.ndarray:
-    """
-    Predict probability for class UP with safe fallback for constant predictors.
-
-    In rare folds training can contain only one class. In that case our model wrapper
-    uses constant predictions; this function converts that to deterministic probability.
-    """
-    if getattr(model, "constant_class", None) is not None:
-        const_class = int(model.constant_class)
-        return np.full(X.shape[0], 1.0 if const_class == 1 else 0.0, dtype=float)
-
-    X_scaled = model.scaler.transform(X)
-    return model.model.predict_proba(X_scaled)[:, 1]
 
 
 def _empty_predictions_frame(df_dataset: pd.DataFrame) -> pd.DataFrame:
@@ -97,15 +76,7 @@ def _run_one_split(
     device: str,
     threshold_metric: str = "recall_min",
 ) -> Dict[str, object]:
-    """
-    Train/evaluate model on one split (used by classic and walk-forward protocols).
-
-    Returns:
-    - metrics for val/test and baselines,
-    - tuned threshold,
-    - test predictions/probabilities,
-    - compact split description.
-    """
+    """Train and evaluate one split (used by classic and walk-forward protocols)."""
     train_df = df_dataset.iloc[split.train_idx].copy().reset_index(drop=True)
     val_df = df_dataset.iloc[split.val_idx].copy().reset_index(drop=True)
     test_df = df_dataset.iloc[split.test_idx].copy().reset_index(drop=True)
@@ -140,19 +111,29 @@ def _run_one_split(
         subsample=model_cfg.subsample,
     )
 
-    best_threshold, val_target_score = tune_threshold(
-        model=model,
-        X_val=X_val,
-        y_val=y_val,
-        metric=threshold_metric,
-        verbose=False,
-    )
+    # Balance-aware threshold tuning by default; explicit metric uses legacy tuner.
+    if str(threshold_metric).lower() in {"balanced", "recall_min"}:
+        proba_val = predict_proba_up_safe(model=model, X=X_val)
+        best_threshold, val_target_score = tune_threshold_with_balance(
+            y_val=y_val,
+            proba_up=proba_val,
+            gap_penalty=model_cfg.threshold_gap_penalty,
+            prior_penalty=model_cfg.threshold_prior_penalty,
+        )
+    else:
+        best_threshold, val_target_score = tune_threshold(
+            model=model,
+            X_val=X_val,
+            y_val=y_val,
+            metric=threshold_metric,
+            verbose=False,
+        )
 
     y_pred_train = predict_with_threshold(model=model, X=X_train, threshold=best_threshold)
     y_pred_val = predict_with_threshold(model=model, X=X_val, threshold=best_threshold)
     y_pred_test = predict_with_threshold(model=model, X=X_test, threshold=best_threshold)
 
-    proba_test = _predict_proba_up_safe(model=model, X=X_test)
+    proba_test = predict_proba_up_safe(model=model, X=X_test)
 
     metrics_train = compute_binary_metrics(y_true=y_train, y_pred=y_pred_train)
     metrics_val = compute_binary_metrics(y_true=y_val, y_pred=y_pred_val)
@@ -169,6 +150,9 @@ def _run_one_split(
         "significance_test": significance_test,
         "baseline_majority_test": metrics_base_majority,
         "baseline_random_test": metrics_base_random,
+        "class_share_train_up": float((y_train == 1).mean()) if len(y_train) > 0 else 0.5,
+        "class_share_val_up": float((y_val == 1).mean()) if len(y_val) > 0 else 0.5,
+        "class_share_test_up": float((y_test == 1).mean()) if len(y_test) > 0 else 0.5,
         "y_test": y_test,
         "y_pred_test": y_pred_test,
         "proba_test": proba_test,
@@ -223,6 +207,13 @@ def run_classic_protocol(
         "test_recall_min": float(split_result["metrics_test"]["recall_min"]),
         "test_recall_down": float(split_result["metrics_test"]["recall_down"]),
         "test_recall_up": float(split_result["metrics_test"]["recall_up"]),
+        "test_recall_gap": float(split_result["metrics_test"]["recall_gap"]),
+        "train_up_share": float(split_result["class_share_train_up"]),
+        "val_up_share": float(split_result["class_share_val_up"]),
+        "test_up_share": float(split_result["class_share_test_up"]),
+        "train_target_imbalance": float(abs(0.5 - split_result["class_share_train_up"])),
+        "val_target_imbalance": float(abs(0.5 - split_result["class_share_val_up"])),
+        "test_target_imbalance": float(abs(0.5 - split_result["class_share_test_up"])),
         "baseline_majority_test_acc": float(split_result["baseline_majority_test"]["accuracy"]),
         "baseline_random_test_acc": float(split_result["baseline_random_test"]["accuracy"]),
         "p_value_vs_random": float(split_result["significance_test"]["p_value_vs_random"]),
@@ -298,6 +289,7 @@ def run_walk_forward_protocol(
                 "test_recall_min": float(fold["metrics_test"]["recall_min"]),
                 "test_recall_down": float(fold["metrics_test"]["recall_down"]),
                 "test_recall_up": float(fold["metrics_test"]["recall_up"]),
+                "test_recall_gap": float(fold["metrics_test"]["recall_gap"]),
             }
         )
     fold_table = pd.DataFrame(fold_table_rows)
@@ -313,6 +305,11 @@ def run_walk_forward_protocol(
         "test_recall_min": float(agg_metrics_test["recall_min"]),
         "test_recall_down": float(agg_metrics_test["recall_down"]),
         "test_recall_up": float(agg_metrics_test["recall_up"]),
+        "test_recall_gap": float(agg_metrics_test["recall_gap"]),
+        "test_up_share": float((y_true_all == 1).mean()) if len(y_true_all) > 0 else 0.5,
+        "test_target_imbalance": float(abs(0.5 - (y_true_all == 1).mean())) if len(y_true_all) > 0 else 0.0,
+        "pred_up_share": float((y_pred_all == 1).mean()) if len(y_pred_all) > 0 else 0.5,
+        "pred_target_gap": float(abs((y_pred_all == 1).mean() - (y_true_all == 1).mean())) if len(y_true_all) > 0 else 0.0,
         "baseline_majority_test_acc": float(agg_base_majority["accuracy"]),
         "baseline_random_test_acc": float(agg_base_random["accuracy"]),
         "p_value_vs_random": float(agg_significance["p_value_vs_random"]),
@@ -342,7 +339,7 @@ def _search_cache_key(
         "label_cfg": asdict(label_cfg),
         "model_cfg": asdict(model_cfg),
         "wf_cfg": asdict(wf_cfg),
-        "schema": "moon_search_v1",
+        "schema": "moon_search_v2",
     }
 
 
@@ -422,11 +419,29 @@ def run_gauss_search(
         row = dict(run_result["summary"])
         row["gauss_window"] = int(gauss_window)
         row["gauss_std"] = float(gauss_std)
+
+        # Backward-compatibility for old cached runs:
+        # previous schema did not store `test_recall_gap`.
+        # If missing, we reconstruct it from per-class recalls.
+        if "test_recall_gap" not in row:
+            recall_down = row.get("test_recall_down")
+            recall_up = row.get("test_recall_up")
+            if recall_down is not None and recall_up is not None:
+                row["test_recall_gap"] = abs(float(recall_down) - float(recall_up))
+            else:
+                row["test_recall_gap"] = np.nan
+
         rows.append(row)
         detailed_runs.append(run_result)
 
+    # Ranking priority chosen for balanced direction-recognition quality:
+    # 1) maximize recall_min (weak side performance),
+    # 2) minimize recall_gap (class balance),
+    # 3) maximize MCC (overall correlation quality),
+    # 4) then accuracy as a tie-breaker.
     df_results = pd.DataFrame(rows).sort_values(
-        ["test_recall_min", "test_mcc", "test_acc"], ascending=[False, False, False]
+        ["test_recall_min", "test_recall_gap", "test_mcc", "test_acc"],
+        ascending=[False, True, False, False],
     )
 
     if df_results.empty:

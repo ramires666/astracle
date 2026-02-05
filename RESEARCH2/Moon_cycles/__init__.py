@@ -23,6 +23,7 @@ from .eval_utils import (
     make_majority_baseline,
 )
 from .eval_visuals import VisualizationConfig, evaluate_with_visuals
+from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
 from .search_utils import (
     WalkForwardConfig,
     XgbConfig,
@@ -49,6 +50,8 @@ __all__ = [
     "make_majority_baseline",
     "VisualizationConfig",
     "evaluate_with_visuals",
+    "predict_proba_up_safe",
+    "tune_threshold_with_balance",
     "WalkForwardConfig",
     "XgbConfig",
     "evaluate_fixed_gauss",

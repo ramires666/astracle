@@ -48,6 +48,8 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 
+from .evaluation_stats import compute_accuracy_significance
+
 
 # =============================================================================
 # MAIN EVALUATION FUNCTION
@@ -63,6 +65,7 @@ def evaluate_model_full(
     figsize: Tuple[int, int] = (14, 5),
     show_plot: bool = True,
     prices: Optional[pd.Series] = None,
+    random_baseline: float = 0.5,
 ) -> Dict:
     """
     Comprehensive model evaluation with visualizations.
@@ -118,6 +121,8 @@ def evaluate_model_full(
         - recall_gap: Difference between recalls (should be small for balance)
         - f1_down, f1_up, f1_min, f1_gap: Same but for F1 score
         - precision_down, precision_up: Precision per class
+        - p_value_vs_random: One-sided p-value vs random baseline (0.5 by default)
+        - accuracy_ci95_low / accuracy_ci95_high: Wilson 95% CI for accuracy
     
     WHY WE USE RECALL_MIN AS TARGET:
     ---------------------------------
@@ -200,6 +205,16 @@ def evaluate_model_full(
         "precision_down": report[label_names[0]]["precision"],
         "precision_up": report[label_names[1]]["precision"],
     }
+
+    # -------------------------------------------------------------------------
+    # STEP 3.1: Statistical significance vs random baseline
+    # -------------------------------------------------------------------------
+    significance = compute_accuracy_significance(
+        y_true=y_true,
+        y_pred=y_pred,
+        random_baseline=random_baseline,
+    )
+    metrics.update(significance)
     
     # -------------------------------------------------------------------------
     # STEP 4: Print metrics summary
@@ -214,6 +229,15 @@ def evaluate_model_full(
     print("-" * 40)
     print(f"R_DOWN: {recall_down:.4f}  |  R_UP: {recall_up:.4f}  |  R_MIN: {recall_min:.4f}  |  GAP: {recall_gap:.4f}")
     print(f"F1_DOWN: {f1_down:.4f} |  F1_UP: {f1_up:.4f} |  F1_MIN: {f1_min:.4f} |  GAP: {f1_gap:.4f}")
+    print("-" * 40)
+    print(
+        f"Significance vs random({random_baseline:.2f}): "
+        f"p-value={significance['p_value_vs_random']:.6g}"
+    )
+    print(
+        f"Accuracy 95% CI (Wilson): "
+        f"[{significance['accuracy_ci95_low']:.4f}, {significance['accuracy_ci95_high']:.4f}]"
+    )
     print("=" * 60)
     
     # -------------------------------------------------------------------------
