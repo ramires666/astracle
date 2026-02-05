@@ -206,11 +206,12 @@ body {
 .stat-badge {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: center;
     padding: var(--spacing-sm) var(--spacing-md);
     background: var(--bg-glass);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);
+    text-align: center;
 }
 
 .stat-badge.loading .stat-value {
@@ -422,4 +423,3 @@ input[type="range"]::-webkit-slider-thumb:hover {
     border-color: var(--accent-gold);
     color: var(--accent-gold);
 }
-
