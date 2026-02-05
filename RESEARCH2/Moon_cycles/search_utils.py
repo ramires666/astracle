@@ -25,6 +25,7 @@ from .eval_utils import (
     make_majority_baseline,
 )
 from .moon_data import MoonLabelConfig, build_moon_dataset_for_gauss, get_moon_feature_columns
+from .progress_utils import progress_update
 from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
 from .splits import (
     SplitDefinition,
@@ -372,6 +373,7 @@ def run_gauss_search(
     rows: List[Dict[str, object]] = []
     detailed_runs: List[Dict[str, object]] = []
 
+    total_runs, done_runs, best_so_far = int(len(combos)), 0, None  # Progress counters + best-so-far snapshot.
     for gauss_window, gauss_std in combos:
         key = _search_cache_key(
             protocol=protocol,
@@ -383,6 +385,7 @@ def run_gauss_search(
         )
 
         cached = load_cache("research2_moon", "search_run", key, verbose=verbose) if use_cache else None
+        source = "cached" if cached is not None else "computed"
         if cached is not None:
             run_result = cached
         else:
@@ -434,11 +437,10 @@ def run_gauss_search(
         rows.append(row)
         detailed_runs.append(run_result)
 
-    # Ranking priority chosen for balanced direction-recognition quality:
-    # 1) maximize recall_min (weak side performance),
-    # 2) minimize recall_gap (class balance),
-    # 3) maximize MCC (overall correlation quality),
-    # 4) then accuracy as a tie-breaker.
+        done_runs += 1
+        best_so_far = progress_update(best_so_far, row, done_runs, total_runs, prefix="gauss_search", verbose=verbose, source=source)
+
+    # Ranking priority: maximize recall_min, minimize recall_gap, maximize MCC, then accuracy.
     df_results = pd.DataFrame(rows).sort_values(
         ["test_recall_min", "test_recall_gap", "test_mcc", "test_acc"],
         ascending=[False, True, False, False],

@@ -8,6 +8,7 @@ from .moon_data import (
     get_moon_feature_columns,
     load_market_slice,
 )
+from .ephemeris_data import EphemerisFeatureConfig, build_ephemeris_feature_set
 from .splits import (
     SplitDefinition,
     describe_split,
@@ -31,12 +32,21 @@ from .search_utils import (
     evaluate_fixed_gauss,
     run_gauss_search,
 )
+from .trading_utils import (
+    TradingConfig,
+    backtest_long_flat_signals,
+    build_signal_from_proba,
+    plot_backtest_price_and_equity,
+    sweep_trading_params,
+)
 
 __all__ = [
     "MoonLabelConfig",
     "build_balanced_labels_for_gauss",
     "build_moon_dataset_for_gauss",
     "build_moon_phase_features",
+    "EphemerisFeatureConfig",
+    "build_ephemeris_feature_set",
     "get_moon_feature_columns",
     "load_market_slice",
     "SplitDefinition",
@@ -60,4 +70,9 @@ __all__ = [
     "XgbConfig",
     "evaluate_fixed_gauss",
     "run_gauss_search",
+    "TradingConfig",
+    "backtest_long_flat_signals",
+    "build_signal_from_proba",
+    "plot_backtest_price_and_equity",
+    "sweep_trading_params",
 ]

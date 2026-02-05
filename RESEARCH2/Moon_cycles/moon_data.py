@@ -228,6 +228,7 @@ def build_moon_dataset_for_gauss(
     gauss_window: int,
     gauss_std: float,
     label_cfg: MoonLabelConfig,
+    cache_namespace: str = "research2_moon",
     use_cache: bool = True,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -246,7 +247,7 @@ def build_moon_dataset_for_gauss(
     }
 
     if use_cache:
-        cached = load_cache("research2_moon", "dataset", cache_params, verbose=verbose)
+        cached = load_cache(str(cache_namespace), "dataset", cache_params, verbose=verbose)
         if cached is not None:
             return cached
 
@@ -272,7 +273,7 @@ def build_moon_dataset_for_gauss(
     df_dataset = pd.merge(df_dataset, df_close, on="date", how="left")
 
     if use_cache:
-        save_cache(df_dataset, "research2_moon", "dataset", cache_params, verbose=verbose)
+        save_cache(df_dataset, str(cache_namespace), "dataset", cache_params, verbose=verbose)
 
     return df_dataset
 

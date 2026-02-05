@@ -46,7 +46,6 @@ from .progress_utils import progress_update
 from .splits import SplitDefinition, make_classic_split
 from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
 
-
 # =====================================================================================
 # MODEL SPECS
 # =====================================================================================
@@ -372,6 +371,7 @@ def run_moon_model_bakeoff(
     xgb_params: Optional[Dict[str, object]] = None,
     threshold_gap_penalty: float = 0.25,
     threshold_prior_penalty: float = 0.05,
+    cache_namespace: str = "research2_moon",
     use_cache: bool = True,
     verbose: bool = True,
 ) -> Dict[str, object]:
@@ -418,6 +418,7 @@ def run_moon_model_bakeoff(
             gauss_window=int(gauss_window),
             gauss_std=float(gauss_std),
             label_cfg=label_cfg,
+            cache_namespace=cache_namespace,
             use_cache=use_cache,
             verbose=verbose,
         )
@@ -435,7 +436,7 @@ def run_moon_model_bakeoff(
                 threshold_prior_penalty=threshold_prior_penalty,
             )
 
-            cached = load_cache("research2_moon", "bakeoff_run", cache_key, verbose=verbose) if use_cache else None
+            cached = load_cache(cache_namespace, "bakeoff_run", cache_key, verbose=verbose) if use_cache else None
             source = "cached" if cached is not None else "computed"
             if cached is not None:
                 run = cached
@@ -452,7 +453,7 @@ def run_moon_model_bakeoff(
                     device=device,
                 )
                 if use_cache:
-                    save_cache(run, "research2_moon", "bakeoff_run", cache_key, verbose=verbose)
+                    save_cache(run, cache_namespace, "bakeoff_run", cache_key, verbose=verbose)
 
             row = dict(run["summary"])
             row["gauss_window"] = int(gauss_window)
@@ -460,7 +461,10 @@ def run_moon_model_bakeoff(
             all_rows.append(row)
             detailed[(model_name, int(gauss_window), float(gauss_std))] = run
 
-            # Primitive progress: how many runs we finished and what is the best result so far.
+            # Primitive progress (for humans only):
+            # - shows done/left + key metrics for the current run,
+            # - also shows the best TEST result seen so far (just for monitoring).
+            # IMPORTANT: below we still pick winners PER MODEL by VALIDATION only.
             done_runs += 1
             best_so_far = progress_update(best_so_far, row, done_runs, total_runs, prefix="bakeoff", verbose=verbose, source=source)
 

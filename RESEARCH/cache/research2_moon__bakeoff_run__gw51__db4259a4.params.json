@@ -1,0 +1,22 @@
+{
+  "schema": "moon_bakeoff_v1",
+  "model": "logreg",
+  "gauss_window": 51,
+  "gauss_std": 30.0,
+  "label_cfg": {
+    "horizon": 1,
+    "move_share": 0.5,
+    "label_mode": "balanced_detrended",
+    "price_mode": "raw"
+  },
+  "xgb_params": {
+    "n_estimators": 500,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "colsample_bytree": 0.8,
+    "subsample": 0.8,
+    "early_stopping_rounds": 50
+  },
+  "threshold_gap_penalty": 0.25,
+  "threshold_prior_penalty": 0.1
+}

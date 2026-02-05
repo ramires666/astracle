@@ -1,0 +1,12 @@
+{
+  "kind": "labels",
+  "start_date": "2017-11-01",
+  "end_date": "2026-02-03",
+  "rows": 3017,
+  "horizon": 1,
+  "move_share": 0.5,
+  "gauss_window": 351,
+  "gauss_std": 20.0,
+  "label_mode": "balanced_detrended",
+  "price_mode": "raw"
+}
