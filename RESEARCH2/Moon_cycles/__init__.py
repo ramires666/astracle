@@ -24,6 +24,7 @@ from .eval_utils import (
 )
 from .eval_visuals import VisualizationConfig, evaluate_with_visuals
 from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
+from .bakeoff_utils import SkModelSpec, default_model_specs, run_moon_model_bakeoff
 from .search_utils import (
     WalkForwardConfig,
     XgbConfig,
@@ -52,6 +53,9 @@ __all__ = [
     "evaluate_with_visuals",
     "predict_proba_up_safe",
     "tune_threshold_with_balance",
+    "SkModelSpec",
+    "default_model_specs",
+    "run_moon_model_bakeoff",
     "WalkForwardConfig",
     "XgbConfig",
     "evaluate_fixed_gauss",
