@@ -167,6 +167,10 @@ def progress_update(
 
     src = f" src={source}" if source else ""
 
-    print(f"[{done}/{total}] left={left} {prefix}{src} {cfg} | {met} | BEST {best_cfg} | {best_met}")
+    # Very important wording:
+    # - BEST_TEST is chosen using TEST metrics ONLY (see update_best_on_test).
+    # - This is for live monitoring while a long loop is running.
+    # - It is NOT the experiment selection rule (we still select winners by validation).
+    print(f"[{done}/{total}] left={left} {prefix}{src} {cfg} | {met} | BEST_TEST {best_cfg} | {best_met}")
 
     return new_best

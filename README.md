@@ -7,6 +7,10 @@
 [![XGBoost](https://img.shields.io/badge/XGBoost-2.0+-orange.svg)](https://xgboost.readthedocs.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
+
+
+DEMO service: 
+https://salicylic-bentley-cyanuric.ngrok-free.dev
 ---
 
 ## 📖 Table of Contents
