@@ -383,7 +383,7 @@ def run_moon_model_bakeoff(
     - We choose the winner PER MODEL by VAL metrics only.
     - We then report the winner's TEST metrics (honest final check).
     """
-    model_specs = model_specs or default_model_specs()
+    model_specs = default_model_specs() if model_specs is None else model_specs  # None=defaults, [] allowed (xgb-only scans).
     xgb_params = xgb_params or {
         "n_estimators": 500,
         "max_depth": 6,

@@ -377,7 +377,7 @@ def sweep_trading_params(
             left = total - i
             print(
                 f"[sweep {i}/{total}] left={left} stop={sl:.3f} exit_no_sig={ex} "
-                f"| ret={m['return_pct']:.3%} UI={m['ulcer_index']:.2f} win={m['winrate']:.1%} "
+                f"| ret={m['return_pct']:.3%} UI={m['ulcer_index']:.2f} trades={m['num_trades']} win={m['winrate']:.1%} "
                 f"| BEST score={best_score:.3g}"
             )
 

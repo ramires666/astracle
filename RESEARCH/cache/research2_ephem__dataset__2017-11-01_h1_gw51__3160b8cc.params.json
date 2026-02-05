@@ -1,0 +1,11 @@
+{
+  "kind": "dataset",
+  "start_date": "2017-11-01",
+  "end_date": "2026-02-03",
+  "rows": 3017,
+  "gauss_window": 51,
+  "gauss_std": 70.0,
+  "horizon": 1,
+  "move_share": 0.5,
+  "schema": "moon_only_v2"
+}
