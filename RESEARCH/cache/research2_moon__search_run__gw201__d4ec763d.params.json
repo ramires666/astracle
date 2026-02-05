@@ -1,0 +1,31 @@
+{
+  "protocol": "walk_forward",
+  "gauss_window": 201,
+  "gauss_std": 30.0,
+  "label_cfg": {
+    "horizon": 1,
+    "move_share": 0.5,
+    "label_mode": "balanced_detrended",
+    "price_mode": "raw"
+  },
+  "model_cfg": {
+    "n_estimators": 500,
+    "max_depth": 6,
+    "learning_rate": 0.03,
+    "colsample_bytree": 0.8,
+    "subsample": 0.8,
+    "early_stopping_rounds": 50
+  },
+  "wf_cfg": {
+    "warmup_ratio": 0.5,
+    "block_ratios": [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "val_fraction_inside_block": 0.5
+  },
+  "schema": "moon_search_v1"
+}
