@@ -274,7 +274,7 @@ def train_xgb_model(
     y_val: np.ndarray,
     feature_names: List[str],
     n_classes: int = 2,
-    device: str = "cpu",
+    device: str = "auto",
     weight_power: float = 1.0,
     sideways_penalty: float = 1.0,  # NEW: Reduce SIDEWAYS weight (0.3 = -70%)
     **model_params,
@@ -287,7 +287,7 @@ def train_xgb_model(
         X_val, y_val: Validation data
         feature_names: Feature column names
         n_classes: Number of classes (2=binary, 3=ternary)
-        device: 'cpu' or 'cuda'
+        device: 'auto', 'cpu', or 'cuda'
         weight_power: Power for sample weight amplification (default: 1.0)
                       1.0 = standard balanced weights
                       2.0 = stronger weights for minority classes (good for 3+ classes)
@@ -327,23 +327,61 @@ def train_xgb_model(
     verbose_fit = True
     if "verbose" in model_params:
         verbose_fit = model_params.pop("verbose")
-    
+
     params.update(model_params)
-    
-    model = XGBBaseline(
-        n_classes=n_classes,
-        device=device,
-        random_state=42,
-        **params,
-    )
-    
-    model.fit(
-        X_train, y_train,
-        X_val=X_val, y_val=y_val,
-        feature_names=feature_names,
-        sample_weight=w_train,
-        sample_weight_val=w_val,
-    )
+
+    requested_device = str(device).strip().lower()
+    if requested_device == "auto":
+        cuda_ok, _ = check_cuda_available()
+        resolved_device = "cuda" if cuda_ok else "cpu"
+    elif requested_device in {"cpu", "cuda"}:
+        if requested_device == "cuda":
+            cuda_ok, _ = check_cuda_available()
+            resolved_device = "cuda" if cuda_ok else "cpu"
+            if not cuda_ok and verbose_fit:
+                print("[XGB] CUDA requested but unavailable, fallback to CPU.")
+        else:
+            resolved_device = "cpu"
+    else:
+        raise ValueError("device must be one of: 'auto', 'cpu', 'cuda'")
+
+    if verbose_fit:
+        print(f"[XGB] training device: {resolved_device} (requested={requested_device})")
+
+    def _build_model(target_device: str) -> XGBBaseline:
+        return XGBBaseline(
+            n_classes=n_classes,
+            device=target_device,
+            random_state=42,
+            **params,
+        )
+
+    model = _build_model(resolved_device)
+
+    try:
+        model.fit(
+            X_train, y_train,
+            X_val=X_val, y_val=y_val,
+            feature_names=feature_names,
+            sample_weight=w_train,
+            sample_weight_val=w_val,
+        )
+    except Exception as exc:
+        err = str(exc).lower()
+        cuda_related = ("cuda" in err) or ("gpu" in err) or ("device" in err)
+        if resolved_device == "cuda" and cuda_related:
+            if verbose_fit:
+                print(f"[XGB] CUDA training failed, fallback to CPU. reason={exc}")
+            model = _build_model("cpu")
+            model.fit(
+                X_train, y_train,
+                X_val=X_val, y_val=y_val,
+                feature_names=feature_names,
+                sample_weight=w_train,
+                sample_weight_val=w_val,
+            )
+        else:
+            raise
     
     return model
 
