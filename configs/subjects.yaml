@@ -10,7 +10,7 @@ subjects:
     symbol: BTCUSDT
     exchange: binance_futures
     # IMPORTANT: set the correct birth datetime
-    birth_dt_utc: "2009-01-03T18:15:05Z"
+    birth_dt_utc: "2009-10-10T18:15:05Z"
     # Birth geo coordinates (not used in MVP yet)
     birth_lat: 60.11
     birth_lon: 25.18

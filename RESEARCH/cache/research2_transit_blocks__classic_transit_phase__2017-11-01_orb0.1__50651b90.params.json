@@ -1,0 +1,10 @@
+{
+  "kind": "classic_transit_phase",
+  "start_date": "2017-11-01",
+  "end_date": "2026-02-03",
+  "rows": 3017,
+  "orb_mult": 0.1,
+  "birth_dt_utc": "2009-10-10T18:15:05Z",
+  "schema": "v1_no_houses",
+  "include_transit_pair_aspects": true
+}
