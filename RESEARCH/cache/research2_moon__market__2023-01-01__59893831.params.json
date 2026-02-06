@@ -1,0 +1,5 @@
+{
+  "kind": "market_slice",
+  "start_date": "2023-01-01",
+  "end_date": "latest"
+}

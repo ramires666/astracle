@@ -8,10 +8,10 @@ Manages cached predictions stored in parquet files for fast loading.
 This avoids recalculating expensive ephemeris calculations on every request.
 """
 
-import os
 import sys
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
+from threading import Lock
 from typing import Optional, List, Dict, Tuple
 import pandas as pd
 import numpy as np
@@ -44,6 +44,19 @@ FORECAST_DAYS = 365   # 1 year of future predictions
 # IN-MEMORY CACHE (loaded from parquet on startup)
 # =============================================================================
 
+_cache_reload_lock = Lock()
+
+
+def _cache_file_signature(cache_type: str) -> Optional[Tuple[int, int]]:
+    """
+    Return a compact file signature for cache invalidation.
+    """
+    path = get_cache_path(cache_type)
+    if not path.exists():
+        return None
+    stat = path.stat()
+    return stat.st_mtime_ns, stat.st_size
+
 class MemoryCache:
     """
     In-memory cache for instant response.
@@ -56,19 +69,34 @@ class MemoryCache:
         self.accuracy_stats: Dict = {"accuracy": 0, "total": 0, "correct": 0}
         self.is_loaded: bool = False
         self.last_loaded: Optional[datetime] = None
+        self.file_signatures: Dict[str, Optional[Tuple[int, int]]] = {
+            "backtest": None,
+            "forecast": None,
+        }
     
     def load_from_parquet(self) -> bool:
         """Load cache from parquet files into memory."""
         try:
             # Load backtest
-            backtest_df, self.accuracy_stats = get_backtest_with_accuracy_from_file()
+            backtest_df, accuracy_stats = get_backtest_with_accuracy_from_file()
+            backtest_data: List[Dict] = []
             if backtest_df is not None and len(backtest_df) > 0:
-                self.backtest_data = df_to_backtest_list(backtest_df)
+                backtest_data = df_to_backtest_list(backtest_df)
             
             # Load forecast
             forecast_df = load_cached_predictions("forecast")
+            forecast_data: List[Dict] = []
             if forecast_df is not None and len(forecast_df) > 0:
-                self.forecast_data = df_to_forecast_list(forecast_df)
+                forecast_data = df_to_forecast_list(forecast_df)
+
+            # Commit atomically after all reads succeed.
+            self.backtest_data = backtest_data
+            self.forecast_data = forecast_data
+            self.accuracy_stats = accuracy_stats
+            self.file_signatures = {
+                "backtest": _cache_file_signature("backtest"),
+                "forecast": _cache_file_signature("forecast"),
+            }
             
             self.is_loaded = True
             self.last_loaded = datetime.now()
@@ -79,6 +107,18 @@ class MemoryCache:
         except Exception as e:
             print(f"⚠️ Failed to load memory cache: {e}")
             return False
+
+    def is_outdated(self) -> bool:
+        """
+        Check if cache parquet files changed since the last load.
+        """
+        if not self.is_loaded:
+            return False
+
+        return (
+            self.file_signatures.get("backtest") != _cache_file_signature("backtest")
+            or self.file_signatures.get("forecast") != _cache_file_signature("forecast")
+        )
     
     def get_all(self) -> Dict:
         """Get all cached data (instant response)."""
@@ -320,6 +360,7 @@ def df_to_forecast_list(df: pd.DataFrame) -> List[Dict]:
             "direction": row["direction"],
             "confidence": float(row["confidence"]) if pd.notna(row.get("confidence")) else 0.5,
             "simulated_price": float(row.get("simulated_price", 0)),
+            "is_now_anchor": bool(row.get("is_now_anchor", False)) if pd.notna(row.get("is_now_anchor")) else False,
         })
     return data
 
@@ -337,6 +378,13 @@ def get_full_predictions() -> Dict:
     # Try memory cache first (instant response)
     cache = get_memory_cache()
     if cache.is_loaded:
+        if cache.is_outdated():
+            with _cache_reload_lock:
+                # Double-check after lock to avoid duplicate reloads.
+                if cache.is_outdated():
+                    print("♻️ Cache parquet changed on disk, reloading memory cache")
+                    if not cache.load_from_parquet():
+                        print("⚠️ Reload failed, returning previous in-memory cache snapshot")
         return cache.get_all()
     
     # Fall back to loading from files (slower)

@@ -1,0 +1,9 @@
+{
+  "kind": "transit_to_natal_features",
+  "start_date": "2017-11-01",
+  "end_date": "2026-02-05",
+  "rows": 3019,
+  "birth_dt_utc": "2009-10-10T18:15:05Z",
+  "orb_mult": 0.1,
+  "schema": "turning_transit_v1"
+}

@@ -1,26 +1,9 @@
 """
-Trading-style backtest helpers (very simple, research-first).
+Trading sanity-check backtest helpers for research notebooks.
 
-Why this exists in this research:
---------------------------------
-Classification metrics (accuracy / MCC / recall) are useful, but they do not
-always answer the *practical* question we care about:
-
-    "If the model says UP or DOWN, would a simple trading rule make money
-     compared to just holding BTC?"
-
-So this module provides a minimal, honest "signal -> trading PnL" test.
-
-Important honesty notes (please read before trusting results):
--------------------------------------------------------------
-1) We only have DAILY CLOSE prices in this repo. That means:
-   - stop-loss cannot be simulated realistically (we do not know intraday lows),
-   - we approximate stop-loss using close-to-close information.
-2) We assume market orders at the close (no slippage).
-3) We model a simple fee on every buy/sell (default 0.1% = 0.001).
-
-This is not meant to be a production-grade backtester.
-It is meant to be a transparent sanity-check tool for research notebooks.
+Goal: convert model signals into transparent long/flat (and plotting) PnL.
+Assumptions: daily-close execution, close-to-close stop approximation, fixed fee.
+This is intentionally simple and is not a production-grade execution simulator.
 """
 
 from __future__ import annotations
@@ -31,6 +14,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 
 from .eval_visuals import VisualizationConfig, _draw_direction_background, _draw_split_bands, _style_axis, _style_figure, _style_legend
 
@@ -422,6 +406,8 @@ def plot_backtest_price_and_equity(
 
     # Shade background by signal (UP=green, DOWN=red). NaN -> no shading.
     sig_int = pd.Series(df_eq["signal"]).fillna(-1).astype(int).to_numpy()
+    # If strategy uses short=-1 encoding, render it with DOWN color.
+    sig_int = np.where(sig_int < 0, 0, sig_int)
     _draw_direction_background(
         ax=ax_p,
         dates=dates,
@@ -436,11 +422,17 @@ def plot_backtest_price_and_equity(
     # Split bands (train/val/test) if present.
     _draw_split_bands(ax_p, df_eq, vis_cfg)
 
-    # Entry/exit markers.
-    if entry_idx:
+    # Entry/exit markers. On flip bars (exit+entry same index) draw one marker.
+    entry_set = set(int(i) for i in entry_idx)
+    exit_set = set(int(i) for i in exit_idx)
+    flip_idx = sorted(entry_set & exit_set)
+    entry_only = sorted(entry_set - exit_set)
+    exit_only = sorted(exit_set - entry_set)
+
+    if entry_only:
         ax_p.scatter(
-            dates.iloc[entry_idx],
-            price.iloc[entry_idx],
+            dates.iloc[entry_only],
+            price.iloc[entry_only],
             marker="^",
             s=80,
             color=vis_cfg.up_color,
@@ -449,10 +441,10 @@ def plot_backtest_price_and_equity(
             label="Entry",
             zorder=5,
         )
-    if exit_idx:
+    if exit_only:
         ax_p.scatter(
-            dates.iloc[exit_idx],
-            price.iloc[exit_idx],
+            dates.iloc[exit_only],
+            price.iloc[exit_only],
             marker="v",
             s=80,
             color=vis_cfg.down_color,
@@ -461,8 +453,23 @@ def plot_backtest_price_and_equity(
             label="Exit",
             zorder=5,
         )
+    if flip_idx:
+        ax_p.scatter(
+            dates.iloc[flip_idx],
+            price.iloc[flip_idx],
+            marker="D",
+            s=62,
+            color="#ffd166",
+            edgecolor="#0b1220",
+            linewidth=0.8,
+            label="Flip",
+            zorder=6,
+        )
 
-    ax_p.set_ylabel("Price", color=vis_cfg.text_color)
+    # Force plain USD ticks (no scientific notation/hidden offset text on dark theme).
+    ax_p.ticklabel_format(style="plain", axis="y", useOffset=False)
+    ax_p.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax_p.set_ylabel("Price (USD)", color=vis_cfg.text_color)
     _style_legend(ax_p, vis_cfg, loc="upper left")
 
     # --- BOTTOM: equity vs hold ---

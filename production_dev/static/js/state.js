@@ -18,6 +18,7 @@ export const state = {
     // Cached data returned by /api/predictions/full
     cachedBacktest: [],
     cachedForecast: [],
+    cachedActualPrices: [],
     accuracyStats: null,
 
     // A fast lookup for tooltips: "YYYY-MM-DD" -> backtest row
@@ -36,4 +37,3 @@ export const state = {
     // UI flags
     isLoading: false,
 };
-

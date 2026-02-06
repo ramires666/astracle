@@ -17,7 +17,6 @@ Cron Example (run at 6 AM UTC):
 import sys
 from pathlib import Path
 from datetime import date, datetime
-import subprocess
 import traceback
 
 # Add project root to path
@@ -39,16 +38,26 @@ def update_price_data() -> bool:
     """
     log("📊 Updating price data...")
     try:
-        # Import and run price updater
-        from RESEARCH.data_loader import update_btc_prices
-        new_rows = update_btc_prices()
-        log(f"   Added {new_rows} new price records")
+        # Update local parquet source of truth used by production service.
+        from production_dev.market_update import update_full_market_data
+
+        result = update_full_market_data(progress=False, verbose=True)
+        status = result.get("status", "unknown")
+        prev_date = result.get("previous_max_date")
+        new_date = result.get("new_max_date")
+        added = int(result.get("rows_added_estimate", 0))
+
+        if status == "updated":
+            log(
+                f"✅ Market data updated: {prev_date or 'n/a'} -> {new_date or 'n/a'} "
+                f"(+~{added} day rows)"
+            )
+        else:
+            log(f"✅ Market data already up to date (latest: {new_date or 'n/a'})")
         return True
-    except ImportError:
-        log("⚠️ Price updater not found, skipping data update")
-        return True  # Continue anyway
     except Exception as e:
         log(f"❌ Price update failed: {e}")
+        traceback.print_exc()
         return False
 
 

@@ -95,6 +95,7 @@ FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.
 
 _split_predictor: Optional[BtcAstroPredictor] = None
 _full_predictor: Optional[BtcAstroPredictor] = None
+_hourly_refresh_service = None
 
 
 def get_split_predictor() -> BtcAstroPredictor:
@@ -268,10 +269,12 @@ async def get_config():
 @app.get("/api/historical")
 async def get_historical_data(days: int = 30):
     """
-    Get historical BTC price data from project database.
-    
-    Uses the same data loading functions that were used for
-    initial data collection (RESEARCH.data_loader).
+    Get historical BTC price data from local market storage.
+
+    Source priority in data_service:
+    1) processed parquet
+    2) processed csv mirror
+    3) legacy archive csv fallback
     
     Args:
         days: Number of historical days to load (1-1500, default: 30)
@@ -331,6 +334,36 @@ async def get_full_cached_predictions():
         raise HTTPException(status_code=500, detail=f"Cache loading error: {str(e)}")
 
 
+@app.get("/api/refresh/status")
+async def get_refresh_status():
+    """
+    Get status of hourly refresh worker.
+    """
+    global _hourly_refresh_service
+    if _hourly_refresh_service is None:
+        return JSONResponse(
+            content={
+                "enabled": False,
+                "status": "not_running",
+                "message": "Hourly refresh service is not started",
+            }
+        )
+
+    result = _hourly_refresh_service.last_result
+    return JSONResponse(
+        content={
+            "enabled": True,
+            "status": "running",
+            "interval_seconds": _hourly_refresh_service.interval_seconds,
+            "price_change_threshold": _hourly_refresh_service.price_change_threshold,
+            "runtime_device": _hourly_refresh_service.runtime_device,
+            "cuda_available": _hourly_refresh_service.cuda_available,
+            "numba_available": _hourly_refresh_service.numba_available,
+            "last_result": result.__dict__ if result is not None else None,
+        }
+    )
+
+
 # =============================================================================
 # STARTUP / SHUTDOWN EVENTS
 # =============================================================================
@@ -375,12 +408,42 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️ Cache not loaded: {e}")
 
+    # Start hourly refresh (startup check + every hour).
+    try:
+        from production_dev.live_refresh import HourlyRefreshService
+
+        global _hourly_refresh_service
+        refresh_interval = int(os.getenv("LIVE_REFRESH_INTERVAL_SECONDS", "3600"))
+        refresh_threshold = float(os.getenv("LIVE_REFRESH_PRICE_MOVE_THRESHOLD", "0.03"))
+        refresh_enabled = os.getenv("LIVE_REFRESH_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+
+        if refresh_enabled:
+            _hourly_refresh_service = HourlyRefreshService(
+                predictor_factory=get_full_predictor,
+                interval_seconds=refresh_interval,
+                price_change_threshold=refresh_threshold,
+            )
+            await _hourly_refresh_service.start()
+        else:
+            print("ℹ️ Hourly refresh is disabled via LIVE_REFRESH_ENABLED")
+    except Exception as e:
+        print(f"⚠️ Hourly refresh not started: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """
     Application shutdown handler.
     """
+    global _hourly_refresh_service
+    if _hourly_refresh_service is not None:
+        try:
+            await _hourly_refresh_service.stop()
+        except Exception as e:
+            print(f"⚠️ Failed to stop hourly refresh: {e}")
+        finally:
+            _hourly_refresh_service = None
+
     print("👋 Shutting down Bitcoin Astro Predictor")
 
 

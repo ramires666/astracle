@@ -50,6 +50,19 @@ export async function fetchCachedPredictions() {
             state.accuracyStats = data.accuracy;
             updateBacktestStatsBadges(state.accuracyStats);
         }
+
+        // Fetch fresh actual prices from market data source (can be newer than backtest cache).
+        // This keeps the white "Actual Price" line up to date for the latest days.
+        const histDays = Math.min(1500, Math.max(120, Number(state.cachedBacktest.length || 0) + 14));
+        const histResp = await fetch(`${CONFIG.API_BASE}/api/historical?days=${histDays}`);
+        if (histResp.ok) {
+            const histData = await histResp.json();
+            if (Array.isArray(histData?.prices)) {
+                state.cachedActualPrices = histData.prices;
+            }
+        } else {
+            console.warn('Historical prices not available:', histResp.status);
+        }
     } catch (error) {
         console.warn('Could not fetch cached predictions:', error);
     }
@@ -67,4 +80,3 @@ export async function getForecastPredictions(days) {
     const data = await response.json();
     return data.predictions || [];
 }
-

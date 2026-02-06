@@ -1,0 +1,15 @@
+{
+  "kind": "ephemeris_features",
+  "start_date": "2017-11-01",
+  "end_date": "2026-02-06",
+  "rows": 3020,
+  "coord_mode": "both",
+  "orb_mult": 0.12,
+  "include_pair_aspects": true,
+  "include_phases": true,
+  "add_trig_for_longitudes": true,
+  "add_trig_for_moon_phase": true,
+  "add_trig_for_elongations": true,
+  "exclude_bodies": [],
+  "schema": "turning_astro_full_v1_ephem"
+}

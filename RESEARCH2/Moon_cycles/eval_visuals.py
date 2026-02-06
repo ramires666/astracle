@@ -57,6 +57,7 @@ def _style_axis(
     for spine in ax.spines.values():
         spine.set_color(vis_cfg.grid_color)
     ax.tick_params(colors=vis_cfg.text_color)
+    ax.yaxis.get_offset_text().set_color(vis_cfg.text_color)
     ax.xaxis.label.set_color(vis_cfg.text_color)
     ax.yaxis.label.set_color(vis_cfg.text_color)
     ax.title.set_color(vis_cfg.text_color)

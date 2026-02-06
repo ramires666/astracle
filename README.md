@@ -281,8 +281,8 @@ use: `scripts/validate_split_model_metrics.py`.
 # From Windows PowerShell (project is in WSL)
 cd \\wsl$\Ubuntu-24.04\home\rut\ostrofun
 
-# Build and run
-docker-compose -f production_dev/docker-compose.yml up --build
+# Build and run full stack (frontend + backend)
+docker compose -f production_dev/docker-compose.yml up --build
 
 # Open in browser
 start http://localhost:9742
@@ -328,6 +328,9 @@ ostrofun/
 │   │   └── js/                 # Split JS modules (<=500 lines each)
 │   ├── Dockerfile              # Docker build instructions
 │   ├── docker-compose.yml      # Docker deployment config
+│   ├── frontend/               # Nginx frontend container (UI + /api proxy)
+│   │   ├── Dockerfile          # Frontend image build
+│   │   └── nginx.conf          # Reverse proxy config
 │   └── requirements.txt        # Python dependencies
 │
 ├── 📂 RESEARCH/                # 🔬 RESEARCH & TRAINING (for model development)
@@ -426,17 +429,19 @@ uvicorn production_dev.main:app --host 0.0.0.0 --port 9742 --reload
 # From Windows PowerShell
 cd \\wsl$\Ubuntu-24.04\home\rut\ostrofun
 
-# Build the image
-docker build -t btc-astro-predictor -f production_dev/Dockerfile .
-
-# Run the container
-docker run -d -p 9742:9742 --name btc-predictor btc-astro-predictor
+# Build and run full service in containers:
+# - btc-astro-frontend (public, port 9742)
+# - btc-astro-backend (internal API)
+docker compose -f production_dev/docker-compose.yml up -d --build
 
 # Check status
-docker logs btc-predictor
+docker compose -f production_dev/docker-compose.yml ps
+
+# Stream logs
+docker compose -f production_dev/docker-compose.yml logs -f
 
 # Stop when done
-docker stop btc-predictor
+docker compose -f production_dev/docker-compose.yml down
 ```
 
 ---

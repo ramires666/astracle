@@ -10,7 +10,6 @@ Model Configuration (from birthdate_deep_search.ipynb):
 - R_MIN: 0.603, MCC: 0.315
 """
 
-import os
 import sys
 import numpy as np
 import pandas as pd
@@ -18,13 +17,13 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import joblib
-import requests
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models.xgb import XGBBaseline
+from production_dev.coingecko_client import fetch_current_btc_price_usd
 
 
 class BtcAstroPredictor:
@@ -360,7 +359,6 @@ class BtcAstroPredictor:
             pred["simulated_price"] = round(new_price, 2)
         
         return predictions
-    
     def _fetch_current_btc_price(self) -> float:
         """
         Fetch current BTC price from CoinGecko API.
@@ -369,15 +367,17 @@ class BtcAstroPredictor:
             Current BTC price in USD
         """
         try:
-            url = "https://api.coingecko.com/api/v3/simple/price"
-            params = {"ids": "bitcoin", "vs_currencies": "usd"}
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data["bitcoin"]["usd"]
+            return fetch_current_btc_price_usd(timeout=10)
         except Exception as e:
-            print(f"Error fetching BTC price: {e}. Using fallback.")
-            return 100000.0  # Fallback price
+            print(f"Error fetching BTC price: {e}. Falling back to local market close.")
+            try:
+                from production_dev.data_service import get_current_price
+                fallback = float(get_current_price())
+                if fallback > 0:
+                    return fallback
+            except Exception as fallback_error:
+                print(f"Error loading local fallback price: {fallback_error}")
+            return 100000.0  # Final emergency fallback
     
     def _calculate_features(self, target_date: date) -> np.ndarray:
         """

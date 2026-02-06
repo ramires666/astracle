@@ -104,13 +104,18 @@ def _add_sin_cos(df: pd.DataFrame, angle_cols: Sequence[str], suffix: str) -> pd
     - it is easy to read,
     - it is easy to extend later (e.g., add harmonics sin(2x), cos(2x)).
     """
-    out = df
+    out = df.copy()
+    new_cols: dict[str, pd.Series] = {}
     for c in angle_cols:
         if c not in out.columns:
             continue
         rad = np.deg2rad(pd.to_numeric(out[c], errors="coerce").astype(float))
-        out[f"{c}_{suffix}_sin"] = np.sin(rad)
-        out[f"{c}_{suffix}_cos"] = np.cos(rad)
+        new_cols[f"{c}_{suffix}_sin"] = pd.Series(np.sin(rad), index=out.index)
+        new_cols[f"{c}_{suffix}_cos"] = pd.Series(np.cos(rad), index=out.index)
+
+    if new_cols:
+        out = pd.concat([out, pd.DataFrame(new_cols, index=out.index)], axis=1)
+
     return out
 
 

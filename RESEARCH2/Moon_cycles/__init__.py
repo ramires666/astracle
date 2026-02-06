@@ -39,6 +39,22 @@ from .trading_utils import (
     plot_backtest_price_and_equity,
     sweep_trading_params,
 )
+from .trading_utils_short import backtest_long_short_signals
+from .turning_astro_features import (
+    TurningAstroFeatureConfig,
+    build_transit_to_natal_feature_set,
+    build_turning_astro_feature_set,
+    classify_feature_group,
+    summarize_feature_groups,
+)
+from .turning_targets import (
+    build_point_only_targets,
+    build_segment_midpoint_targets,
+    build_turning_target_frame,
+    build_window_kernel_targets,
+    merge_features_with_turning_target,
+)
+from .turning_targets_numba import NUMBA_AVAILABLE
 
 __all__ = [
     "MoonLabelConfig",
@@ -72,7 +88,19 @@ __all__ = [
     "run_gauss_search",
     "TradingConfig",
     "backtest_long_flat_signals",
+    "backtest_long_short_signals",
     "build_signal_from_proba",
     "plot_backtest_price_and_equity",
     "sweep_trading_params",
+    "TurningAstroFeatureConfig",
+    "build_transit_to_natal_feature_set",
+    "build_turning_astro_feature_set",
+    "classify_feature_group",
+    "summarize_feature_groups",
+    "build_point_only_targets",
+    "build_segment_midpoint_targets",
+    "build_turning_target_frame",
+    "build_window_kernel_targets",
+    "merge_features_with_turning_target",
+    "NUMBA_AVAILABLE",
 ]

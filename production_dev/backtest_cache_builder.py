@@ -42,8 +42,8 @@ import numpy as np
 import pandas as pd
 
 
-# We reuse the same "DB first, then local parquet" market loading logic that
-# the FULL-model training already uses. This keeps behavior consistent.
+# We reuse the same local file-based market loading logic that the FULL-model
+# training already uses. This keeps behavior consistent and DB-free.
 from production_dev.train_full_model import (
     SplitReference,
     _build_full_training_dataset,

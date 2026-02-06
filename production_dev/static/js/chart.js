@@ -50,6 +50,57 @@ function addDaysIso(dateStr, days) {
     return toIsoDateLocal(dt);
 }
 
+function diffDays(tsA, tsB) {
+    // Integer day gap between two unix-ms timestamps.
+    return Math.round((Number(tsB) - Number(tsA)) / 86400000);
+}
+
+function clipHistoricalToBacktestRange(historicalRows, backtestSlice) {
+    // Keep actual-price line within the same date window as backtest labels.
+    // This avoids "left side without split bands" when sources have different ranges.
+    if (!Array.isArray(historicalRows) || historicalRows.length === 0) return [];
+    if (!Array.isArray(backtestSlice) || backtestSlice.length === 0) return historicalRows;
+
+    const startTs = toTimeValue(backtestSlice[0].date);
+    const endTs = toTimeValue(backtestSlice[backtestSlice.length - 1].date);
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs)) return historicalRows;
+
+    const clipped = historicalRows.filter((row) => {
+        const ts = toTimeValue(row?.date);
+        return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+    });
+
+    // Fallback to original data if clipping produced nothing.
+    return clipped.length > 0 ? clipped : historicalRows;
+}
+
+function buildActualLinePoints(rows, maxGapDays = 2) {
+    // Build Chart.js points and insert null separators across large date gaps.
+    // This prevents fake diagonal lines over missing-history intervals.
+    const clean = (Array.isArray(rows) ? rows : [])
+        .map((row) => ({ x: toTimeValue(row?.date), y: Number(row?.price) }))
+        .filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y))
+        .sort((a, b) => a.x - b.x);
+
+    if (clean.length === 0) return [];
+
+    const out = [];
+    let prevTs = null;
+    for (const pt of clean) {
+        if (prevTs != null) {
+            const gap = diffDays(prevTs, pt.x);
+            if (Number.isFinite(gap) && gap > maxGapDays) {
+                // Small x-offset keeps point order stable while breaking the line.
+                out.push({ x: prevTs + 1, y: null });
+            }
+        }
+        out.push(pt);
+        prevTs = pt.x;
+    }
+
+    return out;
+}
+
 function splitColor(split) {
     // We keep split colors subtle because the main background already encodes UP/DOWN.
     // Train/Val/Test are about honesty, not about direction.
@@ -109,20 +160,26 @@ function buildPredictionBackgroundPlugin() {
             const allPredictions = [
                 ...backtestSlice.map((p) => ({ ...p, isPast: true })),
                 ...forecastSlice.map((p) => ({ ...p, isPast: false })),
-            ];
+            ].sort((a, b) => toTimeValue(a.date) - toTimeValue(b.date));
 
             if (allPredictions.length === 0) return;
 
             ctx.save();
 
             allPredictions.forEach((pred, index) => {
-                const x = scales.x.getPixelForValue(toTimeValue(pred.date));
+                const predTs = toTimeValue(pred.date);
+                if (!Number.isFinite(predTs)) return;
+                const x = scales.x.getPixelForValue(predTs);
 
                 // Width = distance to next day (pixel space).
                 const nextPred = allPredictions[index + 1];
-                let nextX = x + 10; // fallback width for last rectangle
+                let nextX = scales.x.getPixelForValue(toTimeValue(addDaysIso(pred.date, 1)));
                 if (nextPred) {
-                    nextX = scales.x.getPixelForValue(toTimeValue(nextPred.date));
+                    const nextTs = toTimeValue(nextPred.date);
+                    const gapDays = diffDays(predTs, nextTs);
+                    if (Number.isFinite(nextTs) && Number.isFinite(gapDays) && gapDays <= 2) {
+                        nextX = scales.x.getPixelForValue(nextTs);
+                    }
                 }
                 const width = Math.max(nextX - x, 2);
 
@@ -153,8 +210,11 @@ function buildPredictionBackgroundPlugin() {
                 ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
             });
 
-            // "Today" line for orientation
-            const todayStr = toIsoDateLocal(new Date());
+            // "Today" line for orientation:
+            // Prefer backend-provided anchor date to avoid timezone mismatch
+            // between server UTC day and client local day.
+            const nowAnchor = forecastSlice.find((p) => p?.is_now_anchor === true);
+            const todayStr = nowAnchor?.date || toIsoDateLocal(new Date());
             const todayX = scales.x.getPixelForValue(toTimeValue(todayStr));
             if (todayX >= chartArea.left && todayX <= chartArea.right) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
@@ -248,14 +308,30 @@ export function initializeChart() {
     const ctx = elements.chartCanvas.getContext('2d');
 
     const backtestSlice = state.cachedBacktest.slice(-state.backtestDays);
-    // Feed the time scale numeric timestamps (local midnight) instead of raw strings.
-    // This avoids subtle timezone parsing differences across browsers and makes our
-    // background shading math line up perfectly with the plotted line.
-    const historicalData = backtestSlice
-        .filter((p) => p.actual_price != null)
-        .map((p) => ({ x: toTimeValue(p.date), y: p.actual_price }));
-
     const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
+    // Actual line source priority:
+    // 1) Fresh market prices from /api/historical (can be newer than backtest cache)
+    // 2) Fallback to actual_price embedded in backtest cache
+    const rawHistoricalSource = Array.isArray(state.cachedActualPrices) && state.cachedActualPrices.length > 0
+        ? state.cachedActualPrices.slice(-state.backtestDays)
+        : backtestSlice
+            .filter((p) => p.actual_price != null)
+            .map((p) => ({ date: p.date, price: p.actual_price }));
+
+    const historicalSource = clipHistoricalToBacktestRange(rawHistoricalSource, backtestSlice);
+    const historicalData = buildActualLinePoints(historicalSource, 2);
+
+    // Always include "today" anchor price if backend provided it in forecast cache.
+    const nowAnchor = forecastSlice.find((p) => p?.is_now_anchor === true);
+    if (nowAnchor && nowAnchor.simulated_price != null) {
+        const anchorX = toTimeValue(nowAnchor.date);
+        const exists = historicalData.some((pt) => pt.x === anchorX);
+        if (!exists) {
+            historicalData.push({ x: anchorX, y: Number(nowAnchor.simulated_price) });
+        }
+    }
+    historicalData.sort((a, b) => a.x - b.x);
+
     const forecastData = forecastSlice.map((p) => ({ x: toTimeValue(p.date), y: p.simulated_price || 0 }));
 
     const predictionBackgroundPlugin = buildPredictionBackgroundPlugin();
