@@ -13,6 +13,22 @@ from typing import List
 import pandas as pd
 
 
+def _coerce_date_key(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure merge key ``date`` is a normalized datetime64 column.
+    """
+    out = df.copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    if out["date"].isna().any():
+        bad_count = int(out["date"].isna().sum())
+        raise ValueError(f"Column 'date' contains {bad_count} invalid values after parsing")
+    # Keep calendar date stable and remove time/tz noise before joins.
+    if out["date"].dt.tz is not None:
+        out["date"] = out["date"].dt.tz_localize(None)
+    out["date"] = out["date"].dt.normalize()
+    return out
+
+
 def _sign_to_index(sign: str) -> int:
     """
     Convert zodiac sign to index 0..11.
@@ -30,7 +46,7 @@ def build_body_features(df_bodies: pd.DataFrame) -> pd.DataFrame:
     Turn body table into wide features.
     Expected columns: date, body, lon, speed, is_retro, declination, sign
     """
-    df = df_bodies.copy()
+    df = _coerce_date_key(df_bodies)
     df["sign_idx"] = df["sign"].apply(_sign_to_index)
 
     # Pivot by bodies and parameters
@@ -66,7 +82,8 @@ def build_aspect_pair_features(df_aspects: pd.DataFrame) -> pd.DataFrame:
     if df_aspects.empty:
         return pd.DataFrame(columns=["date"])
 
-    df = _canonicalize_pairs(df_aspects, "p1", "p2")
+    df = _coerce_date_key(df_aspects)
+    df = _canonicalize_pairs(df, "p1", "p2")
     df["key"] = (
         df["p1"].astype(str)
         + "__"
@@ -100,7 +117,8 @@ def build_transit_aspect_features(df_transit_aspects: pd.DataFrame) -> pd.DataFr
     if df_transit_aspects.empty:
         return pd.DataFrame(columns=["date"])
 
-    grouped = df_transit_aspects.groupby(
+    df = _coerce_date_key(df_transit_aspects)
+    grouped = df.groupby(
         ["date", "transit_body", "natal_body", "aspect"]
     ).agg(
         hit=("aspect", "count"),

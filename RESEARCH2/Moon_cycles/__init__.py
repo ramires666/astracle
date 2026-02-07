@@ -23,7 +23,28 @@ from .eval_utils import (
     make_coin_flip_baseline,
     make_majority_baseline,
 )
-from .eval_visuals import VisualizationConfig, evaluate_with_visuals
+try:
+    # Optional dependency: seaborn is required only for visual reports.
+    from .eval_visuals import VisualizationConfig, evaluate_with_visuals
+except ModuleNotFoundError as exc:
+    if str(exc.name) != "seaborn":
+        raise
+
+    class VisualizationConfig:  # type: ignore[override]
+        """Placeholder when seaborn is not installed."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            raise ModuleNotFoundError(
+                "VisualizationConfig requires seaborn. "
+                "Install with: pip install seaborn"
+            )
+
+    def evaluate_with_visuals(*args, **kwargs):  # type: ignore[override]
+        """Placeholder when seaborn is not installed."""
+        raise ModuleNotFoundError(
+            "evaluate_with_visuals requires seaborn. "
+            "Install with: pip install seaborn"
+        )
 from .threshold_utils import predict_proba_up_safe, tune_threshold_with_balance
 from .bakeoff_utils import SkModelSpec, default_model_specs, run_moon_model_bakeoff
 from .search_utils import (
