@@ -6,7 +6,13 @@
 
 import { CONFIG } from './config.js';
 import { state } from './state.js';
-import { updateModelStatus, updateModelInfo, updateBacktestStatsBadges, updateBacktestSliderLimits } from './ui.js';
+import {
+    updateModelStatus,
+    updateModelInfo,
+    updateBacktestStatsBadges,
+    updateBacktestSliderLimits,
+    updateOperationalBadges,
+} from './ui.js';
 
 export async function checkModelHealth() {
     try {
@@ -19,6 +25,7 @@ export async function checkModelHealth() {
             const cfgResp = await fetch(`${CONFIG.API_BASE}/api/config`);
             state.modelInfo = await cfgResp.json();
             updateModelInfo(state.modelInfo);
+            updateOperationalBadges({ modelInfo: state.modelInfo });
         }
     } catch (error) {
         console.error('Health check failed:', error);
@@ -55,14 +62,33 @@ export async function fetchCachedPredictions() {
         // This keeps the white "Actual Price" line up to date for the latest days.
         const histDays = Math.min(1500, Math.max(120, Number(state.cachedBacktest.length || 0) + 14));
         const histResp = await fetch(`${CONFIG.API_BASE}/api/historical?days=${histDays}`);
+        let marketSummary = null;
         if (histResp.ok) {
             const histData = await histResp.json();
             if (Array.isArray(histData?.prices)) {
                 state.cachedActualPrices = histData.prices;
             }
+            marketSummary = histData?.summary || null;
         } else {
             console.warn('Historical prices not available:', histResp.status);
         }
+
+        let refreshStatus = null;
+        try {
+            const refreshResp = await fetch(`${CONFIG.API_BASE}/api/refresh/status`);
+            if (refreshResp.ok) {
+                refreshStatus = await refreshResp.json();
+            }
+        } catch (error) {
+            console.warn('Refresh status not available:', error);
+        }
+
+        updateOperationalBadges({
+            modelInfo: state.modelInfo,
+            cacheInfo: data.cache_info || null,
+            marketSummary,
+            refreshStatus,
+        });
     } catch (error) {
         console.warn('Could not fetch cached predictions:', error);
     }

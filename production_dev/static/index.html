@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bitcoin Astro Predictor | AI-Powered Price Forecast</title>
+    <title>Bitcoin Astro Predictor V2 | AI-Powered Price Forecast</title>
     <meta name="description"
         content="Advanced Bitcoin price direction predictions using astrological analysis and machine learning.">
 
@@ -40,10 +40,87 @@
                     <p class="tagline">AI-Powered Price Direction Forecast</p>
                 </div>
             </div>
+            <div class="v2-panel glass-lite">
+                <span class="v2-badge">Version 2</span>
+                <p class="v2-text" id="v2-proofline">based on new statistically proved research</p>
+                <div class="v2-live-strip">
+                    <span class="v2-live-item" id="v2-live-eval">eval_id: --</span>
+                    <span class="v2-live-item" id="v2-live-cache">cache: --</span>
+                </div>
+                <a
+                    class="v2-doc-link"
+                    href="/static/research/v2_tp_segment_weighted_brief.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Version 2 Scientific Brief
+                </a>
+            </div>
             <div class="header-stats" id="header-stats">
-                <div class="stat-badge loading">
-                    <span class="stat-label">Model Status</span>
-                    <span class="stat-value" id="model-status">Loading...</span>
+                <div class="stat-group-card">
+                    <div class="stat-group-title">Runtime</div>
+                    <div class="stat-group-grid">
+                        <div class="stat-row">
+                            <span class="stat-row-label">Model status</span>
+                            <span class="stat-row-value" id="model-status">Loading...</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Market date</span>
+                            <span class="stat-row-value" id="runtime-market-date">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Cache updated</span>
+                            <span class="stat-row-value" id="runtime-cache-updated">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Refresh cycle</span>
+                            <span class="stat-row-value" id="runtime-refresh-cycle">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-group-card">
+                    <div class="stat-group-title">Model Provenance</div>
+                    <div class="stat-group-grid">
+                        <div class="stat-row">
+                            <span class="stat-row-label">Eval ID</span>
+                            <span class="stat-row-value" id="model-eval-id">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Trained (UTC)</span>
+                            <span class="stat-row-value" id="model-trained-at">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Val threshold</span>
+                            <span class="stat-row-value" id="model-threshold">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-group-card">
+                    <div class="stat-group-title">Quality Snapshot</div>
+                    <div class="stat-group-grid">
+                        <div class="stat-row">
+                            <span class="stat-row-label">Test R_MIN</span>
+                            <span class="stat-row-value" id="quality-test-rmin">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Test MCC</span>
+                            <span class="stat-row-value" id="quality-test-mcc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Test Acc</span>
+                            <span class="stat-row-value" id="quality-test-acc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Val Acc</span>
+                            <span class="stat-row-value" id="quality-val-acc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-row-label">Val R_MIN</span>
+                            <span class="stat-row-value" id="quality-val-rmin">--</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </header>
@@ -147,7 +224,7 @@
             <p>⚠️ <strong>Disclaimer:</strong> This is an experimental tool for educational purposes only.
                 Not financial advice. Past astrological correlations do not guarantee future results.</p>
             <p class="footer-meta">
-                Bitcoin Astro Predictor v1.0 | Model: XGBoost + Swiss Ephemeris
+                Bitcoin Astro Predictor v2.0 | Model: XGBoost + Swiss Ephemeris + TP Segment Statistical Validation
             </p>
         </footer>
     </div>

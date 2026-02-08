@@ -11,5 +11,5 @@ Or with Docker:
     docker-compose -f production_dev/docker-compose.yml up --build
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Ostrofun Team"

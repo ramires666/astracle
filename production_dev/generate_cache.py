@@ -33,6 +33,11 @@ from production_dev.cache_service import (
 from production_dev.backtest_cache_builder import build_split_model_backtest_cache
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def generate_forecast_predictions(
     predictor: BtcAstroPredictor,
     days: int = FORECAST_DAYS,
@@ -118,9 +123,16 @@ def main():
     cache_dir = ensure_cache_dir()
     print(f"📁 Cache directory: {cache_dir}")
     
-    # Model paths
-    SPLIT_MODEL = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"  # Split-trained for honest backtest
-    FULL_MODEL = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"  # Full-trained for best forecast
+    # Model paths:
+    # Prefer turning-grid artifacts by default, keep legacy fallback.
+    split_default = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_split.joblib"
+    full_default = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_full.joblib"
+    legacy_split = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"
+    legacy_full = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"
+
+    SPLIT_MODEL = Path(os.getenv("SPLIT_MODEL_PATH", str(split_default)))
+    FULL_MODEL = Path(os.getenv("FULL_MODEL_PATH", str(full_default)))
+    allow_legacy_fallback = _env_flag("ALLOW_LEGACY_MODEL_FALLBACK", "0")
     
     # =========================================
     # BACKTEST: Use split model (honest accuracy)
@@ -131,9 +143,19 @@ def main():
     # - forward-filled labels (the same "target" used in the notebook)
     # - validation-tuned threshold (recall_min)
     # - explicit split tags (train/val/test) for honest chart labeling
+    if SPLIT_MODEL.exists():
+        split_model_for_backtest = SPLIT_MODEL
+    elif allow_legacy_fallback and legacy_split.exists():
+        split_model_for_backtest = legacy_split
+    else:
+        raise FileNotFoundError(
+            "Split model not found at strict path and legacy fallback disabled. "
+            f"strict={SPLIT_MODEL}, legacy={legacy_split}"
+        )
+    print(f"🧠 Split model path: {split_model_for_backtest}")
     try:
         backtest_result = build_split_model_backtest_cache(
-            split_model_path=SPLIT_MODEL,
+            split_model_path=split_model_for_backtest,
             start_date="2017-11-01",
         )
     except Exception as e:
@@ -182,7 +204,14 @@ def main():
     # Check if full model exists, fallback to split if not.
     forecast_predictor = None
     if FULL_MODEL.exists():
-        candidate = BtcAstroPredictor(model_path=FULL_MODEL)
+        full_model_for_forecast = FULL_MODEL
+    elif allow_legacy_fallback and legacy_full.exists():
+        full_model_for_forecast = legacy_full
+    else:
+        full_model_for_forecast = FULL_MODEL
+    print(f"🔮 Full model path:  {full_model_for_forecast}")
+    if full_model_for_forecast.exists():
+        candidate = BtcAstroPredictor(model_path=full_model_for_forecast)
         if candidate.load_model():
             forecast_predictor = candidate
             print("✅ Forecast model loaded (FULL)")
@@ -191,7 +220,7 @@ def main():
 
     if forecast_predictor is None:
         print("⚠️ Using SPLIT model for forecast fallback")
-        candidate = BtcAstroPredictor(model_path=SPLIT_MODEL)
+        candidate = BtcAstroPredictor(model_path=split_model_for_backtest)
         if not candidate.load_model():
             print("❌ ERROR: Could not load split model for forecast fallback.")
             sys.exit(1)
@@ -236,7 +265,7 @@ def main():
         try:
             import joblib
 
-            artifact = joblib.load(SPLIT_MODEL)
+            artifact = joblib.load(split_model_for_backtest)
             expected_cfg = artifact.get("config", {}) if isinstance(artifact, dict) else {}
             exp_r_min = expected_cfg.get("r_min")
             exp_mcc = expected_cfg.get("mcc")

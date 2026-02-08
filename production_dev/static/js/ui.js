@@ -7,19 +7,23 @@
 
 import { elements } from './elements.js';
 
-function ensureHeaderBadge(id, labelText) {
-    let badge = document.getElementById(id);
-    if (badge) return badge;
+function setValue(id, text, color = null) {
+    const node = document.getElementById(id);
+    if (!node) return;
+    node.textContent = text;
+    if (color) node.style.color = color;
+}
 
-    badge = document.createElement('div');
-    badge.id = id;
-    badge.className = 'stat-badge';
-    badge.innerHTML = `
-        <span class="stat-label">${labelText}</span>
-        <span class="stat-value" id="${id}-value">--</span>
-    `;
-    elements.headerStats.appendChild(badge);
-    return badge;
+function formatUtcTimestamp(value) {
+    if (!value) return '--';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const y = parsed.getUTCFullYear();
+    const m = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getUTCDate()).padStart(2, '0');
+    const hh = String(parsed.getUTCHours()).padStart(2, '0');
+    const mm = String(parsed.getUTCMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm} UTC`;
 }
 
 function formatLift(value, baseline) {
@@ -29,12 +33,6 @@ function formatLift(value, baseline) {
     const sign = diff >= 0 ? '+' : '-';
     const abs = Math.abs(diff * 100).toFixed(1);
     return `${sign}${abs}pp`;
-}
-
-function isNearRandom(value, baseline = 0.5, tolerance = 0.03) {
-    // Treat values within ±3 percentage points of random as "near random".
-    // This avoids over-selling tiny differences.
-    return Math.abs(Number(value) - Number(baseline)) <= tolerance;
 }
 
 function describeAccuracy(acc) {
@@ -101,17 +99,12 @@ export function showLoading(show) {
 }
 
 export function updateModelStatus(healthData) {
-    const statusBadge = elements.headerStats?.querySelector('.stat-badge');
-    if (statusBadge) statusBadge.classList.remove('loading');
-
     if (!elements.modelStatus) return;
 
     if (healthData?.status === 'healthy') {
-        elements.modelStatus.textContent = 'Online';
-        elements.modelStatus.style.color = 'var(--accent-green)';
+        setValue('model-status', 'Online', 'var(--accent-green)');
     } else {
-        elements.modelStatus.textContent = 'Error';
-        elements.modelStatus.style.color = 'var(--accent-red)';
+        setValue('model-status', 'Error', 'var(--accent-red)');
     }
 }
 
@@ -168,69 +161,39 @@ export function updateBacktestStatsBadges(stats) {
     const valStats = stats?.splits?.val || null;
 
     if (typeof testStats.r_min === 'number') {
-        ensureHeaderBadge('backtest-rmin-badge', 'Backtest Test R_MIN');
-        const el = document.getElementById('backtest-rmin-badge-value');
-        if (el) {
-            const tone = describeRMin(testStats.r_min);
-            el.textContent = `${testStats.r_min.toFixed(3)}${tone.suffix}`;
-            el.style.color = tone.color;
-        }
+        const tone = describeRMin(testStats.r_min);
+        setValue('quality-test-rmin', `${testStats.r_min.toFixed(3)}${tone.suffix}`, tone.color);
     }
 
     if (typeof testStats.mcc === 'number') {
-        ensureHeaderBadge('backtest-mcc-badge', 'Backtest Test MCC');
-        const el = document.getElementById('backtest-mcc-badge-value');
-        if (el) {
-            const tone = describeMcc(testStats.mcc);
-            el.textContent = `${testStats.mcc.toFixed(3)}${tone.suffix}`;
-            el.style.color = tone.color;
-        }
+        const tone = describeMcc(testStats.mcc);
+        setValue('quality-test-mcc', `${testStats.mcc.toFixed(3)}${tone.suffix}`, tone.color);
     }
 
     // A simple accuracy badge is still useful for non-technical users.
     if (typeof testStats.accuracy === 'number') {
-        ensureHeaderBadge('backtest-acc-badge', 'Backtest Test Acc');
-        const el = document.getElementById('backtest-acc-badge-value');
-        if (el) {
-            const acc = Number(testStats.accuracy);
-            const lift = formatLift(acc, 0.5);
-            const tone = describeAccuracy(acc);
-            el.textContent = `${(acc * 100).toFixed(1)}% (${lift})${tone.suffix}`;
-            el.style.color = tone.color;
-        }
+        const acc = Number(testStats.accuracy);
+        const lift = formatLift(acc, 0.5);
+        const tone = describeAccuracy(acc);
+        setValue('quality-test-acc', `${(acc * 100).toFixed(1)}% (${lift})${tone.suffix}`, tone.color);
     }
 
     // Validation badges (to make honesty visible at a glance).
     if (valStats && typeof valStats.accuracy === 'number') {
-        ensureHeaderBadge('backtest-val-acc-badge', 'Validation Acc');
-        const el = document.getElementById('backtest-val-acc-badge-value');
-        if (el) {
-            const acc = Number(valStats.accuracy);
-            const lift = formatLift(acc, 0.5);
-            const tone = describeAccuracy(acc);
-            el.textContent = `${(acc * 100).toFixed(1)}% (${lift})${tone.suffix}`;
-            el.style.color = tone.color;
-        }
+        const acc = Number(valStats.accuracy);
+        const lift = formatLift(acc, 0.5);
+        const tone = describeAccuracy(acc);
+        setValue('quality-val-acc', `${(acc * 100).toFixed(1)}% (${lift})${tone.suffix}`, tone.color);
     }
 
     if (valStats && typeof valStats.r_min === 'number') {
-        ensureHeaderBadge('backtest-val-rmin-badge', 'Validation R_MIN');
-        const el = document.getElementById('backtest-val-rmin-badge-value');
-        if (el) {
-            const tone = describeRMin(valStats.r_min);
-            el.textContent = `${valStats.r_min.toFixed(3)}${tone.suffix}`;
-            el.style.color = tone.color;
-        }
+        const tone = describeRMin(valStats.r_min);
+        setValue('quality-val-rmin', `${valStats.r_min.toFixed(3)}${tone.suffix}`, tone.color);
     }
 
     // Optional: show tuned threshold, if cache included it.
     if (typeof stats.decision_threshold === 'number') {
-        ensureHeaderBadge('backtest-thr-badge', 'Val Threshold');
-        const el = document.getElementById('backtest-thr-badge-value');
-        if (el) {
-            el.textContent = stats.decision_threshold.toFixed(2);
-            el.style.color = 'rgba(255, 255, 255, 0.75)';
-        }
+        setValue('model-threshold', stats.decision_threshold.toFixed(2), 'rgba(255, 255, 255, 0.78)');
     }
 
     // Also print the actual date ranges (people trust dates more than ratios).
@@ -246,6 +209,51 @@ export function updateBacktestStatsBadges(stats) {
         } else {
             elements.splitCaption.textContent = '';
         }
+    }
+}
+
+export function updateOperationalBadges({
+    modelInfo = null,
+    cacheInfo = null,
+    marketSummary = null,
+    refreshStatus = null,
+} = {}) {
+    const artifact = modelInfo?.artifact || {};
+    const evalId = artifact?.source_eval_id;
+    const trainedAt = artifact?.trained_at_utc;
+    const threshold = Number(artifact?.decision_threshold ?? modelInfo?.config?.decision_threshold);
+
+    if (evalId != null) setValue('model-eval-id', String(evalId), 'var(--accent-gold)');
+
+    if (trainedAt) setValue('model-trained-at', formatUtcTimestamp(trainedAt), 'rgba(255, 255, 255, 0.8)');
+
+    if (Number.isFinite(threshold)) {
+        setValue('model-threshold', threshold.toFixed(2), 'rgba(255, 255, 255, 0.78)');
+    }
+
+    if (marketSummary?.end_date) setValue('runtime-market-date', String(marketSummary.end_date), 'var(--accent-blue)');
+
+    if (cacheInfo?.last_updated) {
+        setValue('runtime-cache-updated', formatUtcTimestamp(cacheInfo.last_updated), 'rgba(255, 255, 255, 0.82)');
+    }
+
+    const refreshLast = refreshStatus?.last_result || null;
+    if (refreshLast?.checked_at_utc) {
+        const action = refreshLast.action || 'none';
+        const reason = refreshLast.reason || 'n/a';
+        setValue(
+            'runtime-refresh-cycle',
+            `${action} (${reason})`,
+            action === 'none' ? 'rgba(255, 255, 255, 0.76)' : 'var(--accent-green)',
+        );
+    }
+
+    if (elements.v2LiveEval) {
+        elements.v2LiveEval.textContent = `eval_id: ${evalId != null ? String(evalId) : '--'}`;
+    }
+    if (elements.v2LiveCache) {
+        const ts = cacheInfo?.last_updated ? formatUtcTimestamp(cacheInfo.last_updated) : '--';
+        elements.v2LiveCache.textContent = `cache: ${ts}`;
     }
 }
 

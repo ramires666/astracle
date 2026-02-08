@@ -37,8 +37,8 @@ from production_dev.schemas import ForecastResponse, HealthResponse, PredictionI
 
 APP_CONFIG = {
     "title": "Bitcoin Astro Predictor",
-    "description": "AI-powered Bitcoin price direction predictions using astrological analysis",
-    "version": "1.0.0",
+    "description": "AI-powered Bitcoin price direction predictions using astrological analysis (V2 statistically validated)",
+    "version": "2.0.0",
     "port": 9742,  # Non-standard port
 }
 
@@ -90,8 +90,20 @@ if STATIC_DIR.exists():
 # forecast, the forecast will be weaker than it could be.
 #
 # So we keep TWO predictor instances and route each endpoint to the right one.
-SPLIT_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"
-FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"
+# Default paths are now turning-grid artifacts. Legacy paths are fallback.
+DEFAULT_SPLIT_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_split.joblib"
+DEFAULT_FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_full.joblib"
+LEGACY_SPLIT_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"
+LEGACY_FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"
+
+SPLIT_MODEL_PATH = Path(os.getenv("SPLIT_MODEL_PATH", str(DEFAULT_SPLIT_MODEL_PATH)))
+FULL_MODEL_PATH = Path(os.getenv("FULL_MODEL_PATH", str(DEFAULT_FULL_MODEL_PATH)))
+ALLOW_LEGACY_MODEL_FALLBACK = os.getenv("ALLOW_LEGACY_MODEL_FALLBACK", "0").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 _split_predictor: Optional[BtcAstroPredictor] = None
 _full_predictor: Optional[BtcAstroPredictor] = None
@@ -108,9 +120,24 @@ def get_split_predictor() -> BtcAstroPredictor:
     """
     global _split_predictor
     if _split_predictor is None:
-        _split_predictor = BtcAstroPredictor(model_path=SPLIT_MODEL_PATH)
-        if not _split_predictor.load_model():
-            raise RuntimeError("Failed to load SPLIT prediction model")
+        primary = BtcAstroPredictor(model_path=SPLIT_MODEL_PATH)
+        if primary.load_model():
+            _split_predictor = primary
+        elif ALLOW_LEGACY_MODEL_FALLBACK:
+            # Backward-compatible fallback for older deployments.
+            fallback = BtcAstroPredictor(model_path=LEGACY_SPLIT_MODEL_PATH)
+            if not fallback.load_model():
+                raise RuntimeError(
+                    "Failed to load SPLIT prediction model from both paths: "
+                    f"{SPLIT_MODEL_PATH} and {LEGACY_SPLIT_MODEL_PATH}"
+                )
+            _split_predictor = fallback
+        else:
+            raise RuntimeError(
+                "Failed to load SPLIT prediction model from strict path: "
+                f"{SPLIT_MODEL_PATH}. "
+                "Set ALLOW_LEGACY_MODEL_FALLBACK=1 only if you intentionally want legacy artifacts."
+            )
     return _split_predictor
 
 
@@ -128,12 +155,19 @@ def get_full_predictor() -> BtcAstroPredictor:
     global _full_predictor
     if _full_predictor is None:
         if FULL_MODEL_PATH.exists():
-            _full_predictor = BtcAstroPredictor(model_path=FULL_MODEL_PATH)
-            if not _full_predictor.load_model():
-                raise RuntimeError("Failed to load FULL prediction model")
-        else:
-            # Fallback: keep service alive even if full model isn't trained yet.
-            _full_predictor = get_split_predictor()
+            candidate = BtcAstroPredictor(model_path=FULL_MODEL_PATH)
+            if candidate.load_model():
+                _full_predictor = candidate
+                return _full_predictor
+
+        if ALLOW_LEGACY_MODEL_FALLBACK and LEGACY_FULL_MODEL_PATH.exists():
+            candidate = BtcAstroPredictor(model_path=LEGACY_FULL_MODEL_PATH)
+            if candidate.load_model():
+                _full_predictor = candidate
+                return _full_predictor
+
+        # Fallback: keep service alive even if full model isn't trained yet.
+        _full_predictor = get_split_predictor()
     return _full_predictor
 
 

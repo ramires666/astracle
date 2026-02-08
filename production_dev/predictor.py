@@ -96,6 +96,7 @@ class BtcAstroPredictor:
         self.config = config or self.DEFAULT_CONFIG.copy()
         self.model: Optional[XGBBaseline] = None
         self.feature_names: Optional[List[str]] = None
+        self.artifact_meta: Dict = {}
         self.is_loaded = False
         
         # Default model path
@@ -133,7 +134,24 @@ class BtcAstroPredictor:
             model_data = joblib.load(self.model_path)
             self.model = model_data["model"]
             self.feature_names = model_data.get("feature_names", [])
+            # Keep non-config metadata so UI can show real artifact provenance.
+            self.artifact_meta = {
+                "source_eval_id": model_data.get("source_eval_id"),
+                "source_candidate_rank": model_data.get("source_candidate_rank"),
+                "source_checkpoint": model_data.get("source_checkpoint"),
+                "trained_at_utc": model_data.get("trained_at_utc"),
+                "train_samples": model_data.get("train_samples"),
+                "val_samples": model_data.get("val_samples"),
+                "test_samples": model_data.get("test_samples"),
+                "decision_threshold": model_data.get("decision_threshold"),
+            }
             self.config.update(model_data.get("config", {}))
+            # Preserve top-level threshold if config does not contain it.
+            if (
+                "decision_threshold" not in self.config
+                and model_data.get("decision_threshold") is not None
+            ):
+                self.config["decision_threshold"] = float(model_data["decision_threshold"])
             self.is_loaded = True
             print(f"Model loaded successfully from {self.model_path}")
             return True
@@ -263,18 +281,40 @@ class BtcAstroPredictor:
         
         predictions = []
         start_date = date.today() + timedelta(days=1)  # Start from tomorrow
-        
-        for i in range(n_days):
-            target_date = start_date + timedelta(days=i)
+        dates = [start_date + timedelta(days=i) for i in range(n_days)]
+
+        # Turning-grid artifacts are much faster if we build the full date range once.
+        if self._is_turning_pipeline():
+            X = self._calculate_features_batch(dates)
+            proba = self._predict_proba(X)
+            threshold = float(
+                self.config.get("decision_threshold", self.config.get("threshold", 0.5))
+            )
+            proba_up = np.asarray(proba)[:, 1]
+            direction_codes = (proba_up >= threshold).astype(np.int32)
+            confidences = np.where(direction_codes == 1, proba_up, 1.0 - proba_up)
+            for d, code, conf in zip(dates, direction_codes, confidences):
+                predictions.append(
+                    {
+                        "date": d.isoformat(),
+                        "direction": "UP" if int(code) == 1 else "DOWN",
+                        "direction_code": int(code),
+                        "confidence": round(float(conf), 4),
+                    }
+                )
+            return predictions
+
+        for target_date in dates:
             direction, confidence = self.predict_direction(target_date)
-            
-            predictions.append({
-                "date": target_date.isoformat(),
-                "direction": "UP" if direction == 1 else "DOWN",
-                "direction_code": direction,
-                "confidence": round(confidence, 4),
-            })
-        
+            predictions.append(
+                {
+                    "date": target_date.isoformat(),
+                    "direction": "UP" if direction == 1 else "DOWN",
+                    "direction_code": direction,
+                    "confidence": round(confidence, 4),
+                }
+            )
+
         return predictions
     
     def generate_price_path(
@@ -392,6 +432,10 @@ class BtcAstroPredictor:
         Returns:
             Feature vector as numpy array, aligned with self.feature_names
         """
+        if self._is_turning_pipeline():
+            arr = self._calculate_features_batch([target_date])
+            return arr[0]
+
         try:
             from RESEARCH.astro_engine import (
                 init_ephemeris,
@@ -481,6 +525,72 @@ class BtcAstroPredictor:
             
         except ImportError as e:
             raise RuntimeError(f"Feature calculation requires RESEARCH modules: {e}")
+
+    def _is_turning_pipeline(self) -> bool:
+        """
+        True when artifact was trained by turning-grid pipeline.
+        """
+        return str(self.config.get("feature_pipeline", "")).lower() == "turning_astro_v1"
+
+    def _calculate_features_batch(self, dates: List[date]) -> np.ndarray:
+        """
+        Build feature matrix for multiple dates in one pass.
+
+        Turning-grid artifacts use RESEARCH2 turning astro feature builder and
+        should avoid per-day ephemeris re-init loops for speed.
+        """
+        if len(dates) == 0:
+            return np.empty((0, 0), dtype=float)
+
+        if self._is_turning_pipeline():
+            try:
+                from RESEARCH2.Moon_cycles.turning_astro_features import (
+                    TurningAstroFeatureConfig,
+                    build_turning_astro_feature_set,
+                )
+            except ImportError as e:
+                raise RuntimeError(f"Turning feature pipeline import failed: {e}")
+
+            feature_cfg = self.config.get("feature_cfg", {}) if isinstance(self.config.get("feature_cfg"), dict) else {}
+            cfg = TurningAstroFeatureConfig(
+                coord_mode=str(feature_cfg.get("coord_mode", self.config.get("coord_mode", "both"))),
+                orb_mult=float(feature_cfg.get("orb_mult", self.config.get("orb_mult", 0.1))),
+                include_pair_aspects=bool(feature_cfg.get("include_pair_aspects", True)),
+                include_phases=bool(feature_cfg.get("include_phases", True)),
+                include_transit_aspects=bool(feature_cfg.get("include_transit_aspects", True)),
+                add_trig_for_longitudes=bool(feature_cfg.get("add_trig_for_longitudes", True)),
+                add_trig_for_moon_phase=bool(feature_cfg.get("add_trig_for_moon_phase", True)),
+                add_trig_for_elongations=bool(feature_cfg.get("add_trig_for_elongations", True)),
+            )
+            birth_dt_utc = str(
+                self.config.get("birth_dt_utc", self.config.get("birth_date", "2009-10-10"))
+            )
+            df_market = pd.DataFrame({"date": pd.to_datetime(dates)})
+            df_features = build_turning_astro_feature_set(
+                df_market=df_market,
+                birth_dt_utc=birth_dt_utc,
+                cfg=cfg,
+                cache_namespace="production_turning_infer",
+                use_cache=True,
+                verbose=False,
+                progress=False,
+            )
+            df_features["date"] = pd.to_datetime(df_features["date"])
+            df_features = df_features.sort_values("date").reset_index(drop=True)
+            feature_cols = [c for c in df_features.columns if c != "date"]
+            if self.feature_names:
+                missing = [c for c in self.feature_names if c not in df_features.columns]
+                if missing:
+                    zero_block = pd.DataFrame(0.0, index=df_features.index, columns=missing)
+                    df_features = pd.concat([df_features, zero_block], axis=1)
+                df_features = df_features[["date", *self.feature_names]]
+                feature_cols = list(self.feature_names)
+            X = df_features[feature_cols].to_numpy(dtype=float)
+            return X
+
+        # Legacy path: fallback to per-day extraction.
+        rows = [self._calculate_features(d) for d in dates]
+        return np.asarray(rows, dtype=float)
     
     def get_model_info(self) -> Dict:
         """
@@ -493,6 +603,7 @@ class BtcAstroPredictor:
             "is_loaded": self.is_loaded,
             "model_path": str(self.model_path),
             "config": self.config,
+            "artifact": self.artifact_meta,
             "feature_count": len(self.feature_names) if self.feature_names else 0,
             "natal_date": self.config.get("birth_date"),
             "expected_r_min": self.config.get("r_min"),

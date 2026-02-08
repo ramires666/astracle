@@ -25,9 +25,19 @@ import {
 } from './js/ui.js';
 import { exportForecastToCSV } from './js/csv.js';
 
+const AUTO_META_REFRESH_MS = 15 * 60 * 1000;
+let lastMetaRefreshAt = 0;
+
 function rebuildChart() {
     destroyChart();
     initializeChart();
+}
+
+async function refreshLiveData({ rebuild = false } = {}) {
+    await checkModelHealth();
+    await fetchCachedPredictions();
+    lastMetaRefreshAt = Date.now();
+    if (rebuild) rebuildChart();
 }
 
 function setupEventListeners() {
@@ -97,11 +107,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     setupEventListeners();
 
-    // Load model + cache in parallel for fast startup.
-    await Promise.all([checkModelHealth(), fetchCachedPredictions()]);
+    // Load live model/cache snapshots (sequential so badges get model info first).
+    await refreshLiveData({ rebuild: false });
 
     // Build initial chart (uses cached data if available).
     rebuildChart();
+
+    // Keep header badges and chart metadata aligned with daily retrain/cache refresh.
+    setInterval(async () => {
+        try {
+            await refreshLiveData({ rebuild: true });
+        } catch (error) {
+            console.warn('Periodic live refresh failed:', error);
+        }
+    }, AUTO_META_REFRESH_MS);
+
+    // Also refresh when user returns to the tab after being away for a while.
+    document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState !== 'visible') return;
+        const stale = Date.now() - lastMetaRefreshAt > AUTO_META_REFRESH_MS;
+        if (!stale) return;
+        try {
+            await refreshLiveData({ rebuild: true });
+        } catch (error) {
+            console.warn('Visibility refresh failed:', error);
+        }
+    });
 
     console.log('✅ Initialization complete');
 });
@@ -111,4 +142,3 @@ window.onerror = function (msg, url, lineNo, columnNo, error) {
     console.error('Application error:', { msg, url, lineNo, columnNo, error });
     return false;
 };
-

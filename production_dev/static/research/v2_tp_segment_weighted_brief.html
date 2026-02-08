@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitcoin Astro Predictor V2 | Statistical Evidence Brief</title>
+    <meta name="description" content="Concise scientific brief of TP-segment weighted statistical significance for Bitcoin regime prediction.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/research/v2_brief.css">
+</head>
+
+<body>
+    <main class="paper">
+        <p class="eyebrow">Bitcoin Astro Predictor | Version 2</p>
+        <h1>Statistical Evidence Brief for TP-Segment Regime Alignment</h1>
+        <p class="lead">
+            This brief is a compact scientific-style summary derived from
+            <code>RESEARCH/grid_search_massive_label_weighted_statistical_significance_tp_segment_weighted.ipynb</code>
+            and top-100 grid-search significance results.
+            The objective is to test whether regime-segment alignment between astro-only model outputs and Bitcoin market structure is better than random.
+        </p>
+        <p class="meta">
+            Core data source:
+            <code>data/market/reports/turning_massive_label_grid_top100_tp_segment_weighted_g1p5_mind5_tail1_pred-hard_label.csv</code><br>
+            Each candidate was evaluated against a permutation null (median permutations per candidate: <strong>451</strong>).
+        </p>
+
+        <section>
+            <h2>Executive Summary</h2>
+            <div class="quick-grid">
+                <article class="quick-card">
+                    <p class="quick-label">Analyzed Candidates</p>
+                    <p class="quick-value" id="q-n-candidates">--</p>
+                </article>
+                <article class="quick-card">
+                    <p class="quick-label">Candidates With p &lt; 0.05</p>
+                    <p class="quick-value" id="q-p-lt-005">--</p>
+                </article>
+                <article class="quick-card">
+                    <p class="quick-label">Positive Effect Size (Δ &gt; 0)</p>
+                    <p class="quick-value" id="q-delta-positive">--</p>
+                </article>
+                <article class="quick-card">
+                    <p class="quick-label">Combined Fisher p-value</p>
+                    <p class="quick-value" id="q-fisher-p">--</p>
+                </article>
+                <article class="quick-card">
+                    <p class="quick-label">Latest Market Date</p>
+                    <p class="quick-value" id="q-market-date">--</p>
+                </article>
+                <article class="quick-card">
+                    <p class="quick-label">Active Model eval_id</p>
+                    <p class="quick-value" id="q-active-eval">--</p>
+                </article>
+            </div>
+            <p class="callout">
+                <strong>Interpretation:</strong> aggregate evidence is inconsistent with a purely random alignment model.
+                The result supports the V2 statement:
+                <strong>"weighted TP-segment alignment is non-random at aggregate level."</strong>
+            </p>
+        </section>
+
+        <section>
+            <h2>Methods (Condensed)</h2>
+            <p>
+                For each top candidate from the massive turning-point grid search, we compute a weighted segment-hit statistic and compare it to a permutation null.
+                The null preserves structure but randomizes alignment, producing an empirical p-value:
+                <code>p_shift_weighted_hit</code>.
+            </p>
+            <p>
+                We then aggregate evidence across candidates using:
+                (1) sign test on effect direction (<code>delta_weighted_hit_vs_null &gt; 0</code>),
+                (2) Fisher combined p-value,
+                (3) distributional plots and model-quality trade-off review.
+            </p>
+        </section>
+
+        <section>
+            <h2>Key Visual Evidence</h2>
+            <div class="figure-grid">
+                <figure>
+                    <img src="/static/research/v2_assets/p_value_distribution.png" alt="Histogram of weighted-hit p-values">
+                    <figcaption>
+                        <strong>Figure 1.</strong> Distribution of permutation p-values for top-100 candidates.
+                        The left tail contains more low-p candidates than expected for a purely random ranking.
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="/static/research/v2_assets/observed_vs_null_scatter.png" alt="Observed vs null weighted-hit rate scatter">
+                    <figcaption>
+                        <strong>Figure 2.</strong> Observed weighted-hit rate vs null mean.
+                        Most points are above diagonal; best candidate (eval_id=7279) is a strong positive outlier.
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="/static/research/v2_assets/delta_distribution.png" alt="Effect size distribution">
+                    <figcaption>
+                        <strong>Figure 3.</strong> Effect size distribution for
+                        <code>delta_weighted_hit_vs_null</code>.
+                        Mean effect is positive (0.078), bootstrap 95% CI [0.039, 0.118].
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="/static/research/v2_assets/top10_delta_bar.png" alt="Top 10 models effect sizes">
+                    <figcaption>
+                        <strong>Figure 4.</strong> Top-10 candidates after significance-first sorting.
+                        Green bars denote p &lt; 0.05.
+                    </figcaption>
+                </figure>
+                <figure>
+                    <img src="/static/research/v2_assets/top15_tradeoff_scatter.png" alt="Top 15 tradeoff chart">
+                    <figcaption>
+                        <strong>Figure 5.</strong> Recall-min / MCC / objective-profit trade-off among top-15.
+                        Marker size encodes <code>test_profit_y_obj</code>.
+                    </figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section>
+            <h2>Primary Metrics Table</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                        <th>Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>p_shift_weighted_hit &lt; 0.05</td>
+                        <td class="good" id="m-p-lt-005">--</td>
+                        <td>Concentration of low p-values is above random baseline expectation.</td>
+                    </tr>
+                    <tr>
+                        <td>p_shift_weighted_hit &lt; 0.01</td>
+                        <td class="good" id="m-p-lt-001">--</td>
+                        <td>Several candidates stay significant under stricter threshold.</td>
+                    </tr>
+                    <tr>
+                        <td>Δ weighted-hit &gt; 0</td>
+                        <td class="good" id="m-delta-pos">--</td>
+                        <td>Directional tilt to positive effect size, not 50/50.</td>
+                    </tr>
+                    <tr>
+                        <td>Sign test p-value</td>
+                        <td class="good" id="m-sign-p">--</td>
+                        <td>Probability of 65+ positives out of 100 under random direction is very low.</td>
+                    </tr>
+                    <tr>
+                        <td>Fisher combined p-value</td>
+                        <td class="good" id="m-fisher-p">--</td>
+                        <td>Aggregate evidence across candidate set is strongly non-random.</td>
+                    </tr>
+                    <tr>
+                        <td>Stouffer combined z / p</td>
+                        <td class="good" id="m-stouffer">--</td>
+                        <td>Independent aggregate test confirms positive global shift.</td>
+                    </tr>
+                    <tr>
+                        <td>Mean Δ (bootstrap CI95)</td>
+                        <td class="good" id="m-mean-delta">--</td>
+                        <td>Effect-size center remains above zero under resampling.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Best V2 Candidate Snapshot (eval_id=7279)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>p_shift_weighted_hit</td><td class="good" id="b-p">--</td></tr>
+                    <tr><td>delta_weighted_hit_vs_null</td><td class="good" id="b-delta">--</td></tr>
+                    <tr><td>weighted_hit_rate_obs / null_mean</td><td class="good" id="b-hit">--</td></tr>
+                    <tr><td>test_profit_y_obj</td><td class="good" id="b-profit">--</td></tr>
+                    <tr><td>test_recall_min</td><td class="warn" id="b-rmin">--</td></tr>
+                    <tr><td>test_recall_gap</td><td class="warn" id="b-gap">--</td></tr>
+                    <tr><td>test_mcc</td><td class="good" id="b-mcc">--</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Conclusion</h2>
+            <ul class="list">
+                <li>At aggregate level, the V2 TP-segment metric shows statistically significant non-random alignment.</li>
+                <li>The strongest candidates present substantial positive effect size relative to permutation null.</li>
+                <li>Quality metrics (recall balance and MCC) still require continuous monitoring alongside objective profit.</li>
+            </ul>
+            <p class="callout">
+                <strong>Verdict (V2):</strong>
+                aggregate evidence supports non-random TP-segment alignment between astro-only model signals and Bitcoin regime structure.
+            </p>
+        </section>
+
+        <p class="footer-note">
+            Prepared as a publication-oriented concise brief for V2 frontend integration.
+            For full derivations and full-cell outputs, use the original notebook and raw reports.
+        </p>
+    </main>
+    <script type="module" src="/static/research/v2_brief.js"></script>
+</body>
+
+</html>

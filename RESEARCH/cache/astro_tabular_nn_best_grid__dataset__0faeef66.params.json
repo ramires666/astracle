@@ -1,0 +1,13 @@
+{
+  "run_tag": "turning_massive_label_grid",
+  "data_start": "2017-11-01",
+  "eval_id": 7795,
+  "target_mode": "segment_midpoint",
+  "feature_coord_mode": "both",
+  "feature_orb_mult": 0.1,
+  "birth_dt_utc": "2009-10-10T18:15:05Z",
+  "label_up_move_pct": 0.04,
+  "label_down_move_pct": 0.045,
+  "target_min_weight": 0.03,
+  "threshold": 0.61
+}

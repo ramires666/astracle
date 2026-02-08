@@ -164,13 +164,22 @@ def build_split_model_backtest_cache(
     # ------------------------------------------------------------------
     # 3) Rebuild the exact same daily dataset as the notebook
     # ------------------------------------------------------------------
-    # We reuse the dataset builder from `train_full_model.py` because it already:
-    # - reproduces the NOTEBOOK label creation call exactly (see comments there)
-    # - computes astro features for ALL dates
-    # - forward-fills labels to ALL days (so target exists daily)
-    # - reindexes features to the artifact feature order
-    split_ref = SplitReference(config=cfg, feature_names=feature_names)
-    df_dataset, feature_cols = _build_full_training_dataset(df_market, split_ref)
+    model_family = str(cfg.get("model_family", "legacy")).lower()
+    if model_family == "turning_massive_label_grid":
+        from production_dev.turning_pipeline import build_turning_dataset_from_artifact_config
+
+        df_dataset, feature_cols = build_turning_dataset_from_artifact_config(
+            df_market=df_market,
+            config=cfg,
+            feature_names_hint=feature_names,
+            cache_namespace="research2_turning_grid",
+            use_cache=True,
+            verbose=True,
+        )
+    else:
+        # Legacy birthdate-deep-search dataset builder.
+        split_ref = SplitReference(config=cfg, feature_names=feature_names)
+        df_dataset, feature_cols = _build_full_training_dataset(df_market, split_ref)
 
     # ------------------------------------------------------------------
     # 4) Split into train/val/test and tune threshold on validation
@@ -186,8 +195,14 @@ def build_split_model_backtest_cache(
     X_val = val_df[feature_cols].to_numpy(dtype=np.float64)
     y_val = val_df["target"].to_numpy(dtype=np.int32)
 
-    # Threshold is tuned to maximize recall_min (best "worst recall" between classes).
-    best_t, best_score = tune_threshold(model, X_val, y_val, metric="recall_min", verbose=True)
+    # For turning-grid artifacts we keep stored threshold from selected candidate.
+    # For legacy artifacts we keep validation tuning behavior.
+    if model_family == "turning_massive_label_grid":
+        best_t = float(cfg.get("decision_threshold", cfg.get("threshold", 0.5)))
+        best_score = float("nan")
+    else:
+        # Threshold is tuned to maximize recall_min (best "worst recall" between classes).
+        best_t, best_score = tune_threshold(model, X_val, y_val, metric="recall_min", verbose=True)
 
     # ------------------------------------------------------------------
     # 5) Inference for ALL days (train+val+test)
@@ -257,7 +272,7 @@ def build_split_model_backtest_cache(
         "label_horizon_days": int(cfg["gauss_window"]) if cfg.get("gauss_window") is not None else None,
         "label_move_share": float(cfg["gauss_std"]) if cfg.get("gauss_std") is not None else None,
         "decision_threshold": float(best_t),
-        "val_recall_min_at_threshold": float(best_score),
+        "val_recall_min_at_threshold": float(best_score) if np.isfinite(best_score) else None,
         "splits": {
             "train": {
                 "start": train_df["date"].min().strftime("%Y-%m-%d") if len(train_df) else None,

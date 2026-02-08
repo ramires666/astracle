@@ -1,0 +1,4 @@
+split,acc,mcc,recall_down,recall_up,recall_min,recall_gap,true_down_share,true_up_share,pred_down_share,pred_up_share,pred_target_gap,true_balance_gap_ud,pred_balance_gap_ud
+train,0.6747,0.3338,0.8601,0.4391,0.4391,0.421,0.5598,0.4402,0.7284,0.2716,0.1686,0.1197,0.4568
+val,0.4701,-0.0595,0.4691,0.4712,0.4691,0.002,0.5388,0.4612,0.4967,0.5033,0.0421,0.0776,0.0067
+test,0.9447,0.3049,0.9526,0.5556,0.5556,0.397,0.9801,0.0199,0.9425,0.0575,0.0376,0.9602,0.885

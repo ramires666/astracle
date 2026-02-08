@@ -14,6 +14,9 @@ services:
       - PYTHONPATH=/app
       - PORT=9742
       - DATABASE_URL=${DATABASE_URL:-}
+      - SPLIT_MODEL_PATH=/app/models_artifacts/btc_astro_predictor.turning_split.joblib
+      - FULL_MODEL_PATH=/app/models_artifacts/btc_astro_predictor.turning_full.joblib
+      - ALLOW_LEGACY_MODEL_FALLBACK=0
     volumes:
       - ../models_artifacts:/app/models_artifacts:ro
       - ../data/ephe:/app/data/ephe:ro
@@ -28,7 +31,7 @@ services:
     labels:
       - "app.name=btc-astro-predictor-backend"
       - "app.description=Bitcoin Astrology Prediction API"
-      - "app.version=1.0.0"
+      - "app.version=2.0.0"
 
   # Frontend static files + reverse proxy to backend API.
   # This is the only public entrypoint.
@@ -46,4 +49,4 @@ services:
     labels:
       - "app.name=btc-astro-predictor-frontend"
       - "app.description=Bitcoin Astrology Prediction UI"
-      - "app.version=1.0.0"
+      - "app.version=2.0.0"

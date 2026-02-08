@@ -24,6 +24,7 @@ IMPORTANT RULES (matching the project intent):
 from __future__ import annotations
 
 import sys
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -41,8 +42,18 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.models.xgb import XGBBaseline
 
 
-SPLIT_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.joblib"
-FULL_MODEL_PATH = PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.full.joblib"
+SPLIT_MODEL_PATH = Path(
+    os.getenv(
+        "SPLIT_MODEL_PATH",
+        str(PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_split.joblib"),
+    )
+)
+FULL_MODEL_PATH = Path(
+    os.getenv(
+        "FULL_MODEL_PATH",
+        str(PROJECT_ROOT / "models_artifacts" / "btc_astro_predictor.turning_full.joblib"),
+    )
+)
 
 # Local, file-based fallback (useful when DB is not available in dev)
 LOCAL_MARKET_FALLBACK = PROJECT_ROOT / "data" / "market" / "processed" / "BTC_full_market_daily.parquet"
@@ -357,8 +368,29 @@ def train_final_model(
     if len(df_market) > 0:
         print(f"   Date range: {df_market['date'].min().date()} -> {df_market['date'].max().date()}")
 
-    df_dataset, feature_cols = _build_full_training_dataset(df_market, split_ref)
-    model = _train_xgb_baseline_full(df_dataset, feature_cols, split_ref)
+    if str(split_ref.config.get("model_family", "")).lower() == "turning_massive_label_grid":
+        from production_dev.turning_pipeline import (
+            build_turning_dataset_from_artifact_config,
+            train_turning_full_model,
+        )
+
+        df_dataset, feature_cols = build_turning_dataset_from_artifact_config(
+            df_market=df_market,
+            config=split_ref.config,
+            feature_names_hint=split_ref.feature_names,
+            cache_namespace="research2_turning_grid",
+            use_cache=True,
+            verbose=True,
+        )
+        model = train_turning_full_model(
+            df_dataset=df_dataset,
+            feature_cols=feature_cols,
+            config=split_ref.config,
+            seed=42,
+        )
+    else:
+        df_dataset, feature_cols = _build_full_training_dataset(df_market, split_ref)
+        model = _train_xgb_baseline_full(df_dataset, feature_cols, split_ref)
 
     # Decision threshold:
     # If a tuned threshold exists in split config, reuse it.

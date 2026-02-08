@@ -15,6 +15,9 @@ export function bindElements() {
     // Header
     elements.modelStatus = document.getElementById('model-status');
     elements.headerStats = document.getElementById('header-stats');
+    elements.v2Proofline = document.getElementById('v2-proofline');
+    elements.v2LiveEval = document.getElementById('v2-live-eval');
+    elements.v2LiveCache = document.getElementById('v2-live-cache');
 
     // Model card
     elements.accuracyBadge = document.getElementById('accuracy-badge');
