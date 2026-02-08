@@ -149,19 +149,19 @@ function buildSplitSegments(backtestSlice) {
 }
 
 function dedupeForecastByDate(rows) {
-    // Defensive dedupe:
-    // Some cache refresh cycles may temporarily expose repeated forecast dates.
-    // We keep only the first row for each calendar date to avoid duplicate tooltip lines.
+    // Keep one forecast row per calendar day.
     const input = Array.isArray(rows) ? rows : [];
-    const seen = new Set();
-    const out = [];
+    const byDay = new Map();
     for (const row of input) {
-        const key = String(row?.date || '');
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        out.push(row);
+        const key = toIsoDateLocal(new Date(toTimeValue(row?.date)));
+        if (!key) continue;
+        const prev = byDay.get(key);
+        // Prefer explicit "now anchor" when duplicate day appears.
+        if (!prev || row?.is_now_anchor === true) {
+            byDay.set(key, row);
+        }
     }
-    return out;
+    return Array.from(byDay.values()).sort((a, b) => toTimeValue(a.date) - toTimeValue(b.date));
 }
 
 function buildPredictionBackgroundPlugin() {
@@ -349,6 +349,14 @@ export function initializeChart() {
     historicalData.sort((a, b) => a.x - b.x);
 
     const forecastData = forecastSlice.map((p) => ({ x: toTimeValue(p.date), y: p.simulated_price || 0 }));
+    const forecastByDate = new Map(
+        forecastSlice.map((p) => [toIsoDateLocal(new Date(toTimeValue(p.date))), p]),
+    );
+    const actualByDate = new Map(
+        historicalData
+            .filter((pt) => Number.isFinite(pt?.x) && Number.isFinite(pt?.y))
+            .map((pt) => [toIsoDateLocal(new Date(pt.x)), Number(pt.y)]),
+    );
 
     const predictionBackgroundPlugin = buildPredictionBackgroundPlugin();
     const splitBandPlugin = buildSplitBandPlugin();
@@ -399,7 +407,7 @@ export function initializeChart() {
             // We use `mode: "x"` so the tooltip matches points by *date* (x value),
             // NOT by array index. Index-based tooltips can incorrectly show an
             // "Actual Price" value for a future forecast day (because dataset lengths differ).
-            interaction: { intersect: false, mode: 'x' },
+            interaction: { intersect: false, mode: 'nearest', axis: 'x' },
             plugins: {
                 legend: {
                     display: true,
@@ -418,41 +426,39 @@ export function initializeChart() {
                     borderWidth: 1,
                     padding: 12,
                     displayColors: true,
-                    mode: 'x',
+                    mode: 'nearest',
                     intersect: false,
                     callbacks: {
-                        label: (context) => {
-                            const label = context.dataset.label;
-                            const value = context.parsed.y;
+                        title: (items) => {
+                            if (!Array.isArray(items) || items.length === 0) return '';
+                            return toIsoDateLocal(new Date(items[0].parsed.x));
+                        },
+                        // Build one compact block per hovered date to avoid duplicate forecast sets.
+                        label: () => null,
+                        afterBody: (items) => {
+                            if (!Array.isArray(items) || items.length === 0) return [];
+                            const dateStr = toIsoDateLocal(new Date(items[0].parsed.x));
+                            const lines = [];
 
-                            if (label === 'Forecast') {
-                                const pred = forecastSlice[context.dataIndex];
-                                if (!pred) return `Forecast: $${value.toLocaleString()}`;
-                                return [
-                                    `Forecast: $${value.toLocaleString()}`,
-                                    `Direction: ${pred.direction}`,
-                                    `Confidence: ${((pred.confidence ?? 0.5) * 100).toFixed(1)}%`,
-                                ];
+                            const actual = actualByDate.get(dateStr);
+                            if (Number.isFinite(actual)) lines.push(`Actual: $${actual.toLocaleString()}`);
+
+                            const row = state.backtestByDate.get(dateStr);
+                            if (row) {
+                                const split = row.split ? row.split.toUpperCase() : 'UNKNOWN';
+                                lines.push(`Split: ${split}`);
+                                if (row.actual_direction) lines.push(`Actual Label: ${row.actual_direction}`);
+                                if (row.correct === true) lines.push('Correct: YES');
+                                if (row.correct === false) lines.push('Correct: NO');
                             }
 
-                            if (label === 'Actual Price') {
-                                // Prefer a local ISO date string so it matches our `backtestByDate` keys.
-                                const dateStr = toIsoDateLocal(new Date(context.parsed.x));
-                                const row = state.backtestByDate.get(dateStr);
-                                const lines = [`Actual: $${value.toLocaleString()}`];
-
-                                if (row) {
-                                    const split = row.split ? row.split.toUpperCase() : 'UNKNOWN';
-                                    lines.push(`Split: ${split}`);
-                                    if (row.actual_direction) lines.push(`Actual Label: ${row.actual_direction}`);
-                                    if (row.correct === true) lines.push('Correct: YES');
-                                    if (row.correct === false) lines.push('Correct: NO');
-                                }
-
-                                return lines;
+                            const pred = forecastByDate.get(dateStr);
+                            if (pred) {
+                                lines.push(`Forecast: $${Number(pred.simulated_price || 0).toLocaleString()}`);
+                                lines.push(`Direction: ${pred.direction}`);
+                                lines.push(`Confidence: ${((pred.confidence ?? 0.5) * 100).toFixed(1)}%`);
                             }
-
-                            return `${label}: $${value.toLocaleString()}`;
+                            return lines;
                         },
                     },
                 },

@@ -5,8 +5,8 @@
 - Meta JSON: `RESEARCH/reports/astro_tabular_nn_grid_directional_segment_weighted_e8_t48_s2_20260208_070704.meta.json`
 - Replay dataset path: `/home/rut/ostrofun/RESEARCH/cache/astro_tabular_nn_best_grid__dataset__0faeef66.parquet`
 - Baseline selected CSV: `RESEARCH/reports/astro_tabular_nn_postrun_wide_balance_20260208_055915/selected_models.csv`
-- Generated at: `2026-02-08T12:12:27+00:00`
-- Ranking objective: maximize `test_cutoff_score` (segment/recal objective with class-gap penalties), then maximize `test_recall_min`, then minimize `test_recall_gap`, then maximize `test_mcc`, then `test_acc`.
+- Generated at: `2026-02-08T12:14:01+00:00`
+- Ranking objective: maximize `test_cutoff_score` (segment/recall objective with class-gap penalties), then maximize `test_recall_min`, then minimize `test_recall_gap`, then maximize `test_mcc`, then `test_acc`.
 
 ## Baseline vs New Best
 

@@ -14,6 +14,20 @@ import {
     updateOperationalBadges,
 } from './ui.js';
 
+function dedupeForecastRows(rows) {
+    const input = Array.isArray(rows) ? rows : [];
+    const byDay = new Map();
+    for (const row of input) {
+        const key = String(row?.date || '').slice(0, 10);
+        if (!key) continue;
+        const prev = byDay.get(key);
+        if (!prev || row?.is_now_anchor === true) {
+            byDay.set(key, row);
+        }
+    }
+    return Array.from(byDay.values()).sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')));
+}
+
 export async function checkModelHealth() {
     try {
         const response = await fetch(`${CONFIG.API_BASE}/api/health`);
@@ -50,7 +64,7 @@ export async function fetchCachedPredictions() {
         }
 
         if (Array.isArray(data.forecast) && data.forecast.length > 0) {
-            state.cachedForecast = data.forecast;
+            state.cachedForecast = dedupeForecastRows(data.forecast);
         }
 
         if (data.accuracy) {
@@ -104,5 +118,5 @@ export async function getForecastPredictions(days) {
     const response = await fetch(`${CONFIG.API_BASE}/api/predict?days=${days}`);
     if (!response.ok) throw new Error(`API error: ${response.status}`);
     const data = await response.json();
-    return data.predictions || [];
+    return dedupeForecastRows(data.predictions || []);
 }
