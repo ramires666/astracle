@@ -103,6 +103,11 @@ class ScoutConfig:
     )
     margin_gap_penalty: float = 0.35
     margin_prior_penalty: float = 0.10
+    cutoff_objective: str = "recall_balance"
+    segment_score_gamma: float = 1.5
+    segment_min_days: int = 5
+    segment_include_open_tail: bool = True
+    segment_metric: str = "weighted_hit_rate"
     top_k_for_bounds: int = 3
 
 

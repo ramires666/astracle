@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -23,6 +24,11 @@ from .metrics_numba import (
 )
 from .model_dcn import AstroTabularDCN
 from .model_deepfm import AstroTabularDeepFM
+from .segment_weighted import (
+    build_tp_segments_from_frame,
+    score_predictions_on_tp_segments,
+    search_best_threshold_segment_weighted,
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,7 @@ class FitResult:
     best_val_score: float
     best_margin: float
     cutoff_kind: str
+    cutoff_objective: str
     train_loss_last: float
     train_metrics: Dict[str, float]
     val_metrics: Dict[str, float]
@@ -173,9 +180,23 @@ def _run_cutoff_search(
     y_true: np.ndarray,
     scout_cfg: ScoutConfig,
     n_classes: int,
+    val_segments: Optional[pd.DataFrame] = None,
 ) -> Tuple[str, float, float]:
+    objective = str(getattr(scout_cfg, "cutoff_objective", "recall_balance")).strip().lower()
     if n_classes == 2:
         threshold_grid = np.asarray(scout_cfg.threshold_grid, dtype=np.float64)
+        if objective in {"segment_weighted", "tp_segment_weighted"} and val_segments is not None and len(val_segments) > 0:
+            res_seg = search_best_threshold_segment_weighted(
+                probs=probs,
+                y_true=y_true,
+                thresholds=threshold_grid,
+                segments=val_segments,
+                gap_penalty=float(scout_cfg.margin_gap_penalty),
+                prior_penalty=float(scout_cfg.margin_prior_penalty),
+                segment_metric=str(getattr(scout_cfg, "segment_metric", "weighted_hit_rate")),
+            )
+            return "threshold", float(res_seg.best_threshold), float(res_seg.best_score)
+
         res = search_best_threshold_binary(
             probs=probs,
             y_true=y_true,
@@ -207,6 +228,75 @@ def _predict_from_cutoff(
     return predict_with_margin(probs=probs, margin=float(cutoff_value))
 
 
+def _is_segment_objective(scout_cfg: ScoutConfig) -> bool:
+    objective = str(getattr(scout_cfg, "cutoff_objective", "recall_balance")).strip().lower()
+    return objective in {"segment_weighted", "tp_segment_weighted"}
+
+
+def _build_segments_for_objective(
+    frame: Optional[pd.DataFrame],
+    scout_cfg: ScoutConfig,
+) -> Optional[pd.DataFrame]:
+    if frame is None or frame.empty:
+        return None
+    if not _is_segment_objective(scout_cfg):
+        return None
+    seg = build_tp_segments_from_frame(
+        frame=frame,
+        gamma=float(getattr(scout_cfg, "segment_score_gamma", 1.5)),
+        min_days=int(getattr(scout_cfg, "segment_min_days", 5)),
+        include_open_tail=bool(getattr(scout_cfg, "segment_include_open_tail", True)),
+    )
+    if seg is None or seg.empty:
+        return None
+    return seg
+
+
+def _segment_metrics_for_pred(
+    pred: np.ndarray,
+    segments: Optional[pd.DataFrame],
+) -> Dict[str, float]:
+    if segments is None or segments.empty:
+        return {
+            "segment_n_segments": 0.0,
+            "segment_n_segment_days": 0.0,
+            "segment_weighted_hit_rate": np.nan,
+            "segment_unweighted_hit_rate": np.nan,
+            "segment_weighted_majority_hit": np.nan,
+            "segment_unweighted_majority_hit": np.nan,
+        }
+
+    met, _ = score_predictions_on_tp_segments(pred_labels=pred, segments=segments)
+    return {
+        "segment_n_segments": float(met.get("n_segments", np.nan)),
+        "segment_n_segment_days": float(met.get("n_segment_days", np.nan)),
+        "segment_weighted_hit_rate": float(met.get("weighted_hit_rate", np.nan)),
+        "segment_unweighted_hit_rate": float(met.get("unweighted_hit_rate", np.nan)),
+        "segment_weighted_majority_hit": float(met.get("weighted_majority_hit", np.nan)),
+        "segment_unweighted_majority_hit": float(met.get("unweighted_majority_hit", np.nan)),
+    }
+
+
+def _cutoff_score_from_metrics(metrics: Dict[str, float], scout_cfg: ScoutConfig) -> float:
+    gap = float(metrics.get("recall_gap", np.nan))
+    prior_gap = float(metrics.get("pred_target_gap", np.nan))
+    if not (np.isfinite(gap) and np.isfinite(prior_gap)):
+        return float("nan")
+
+    if _is_segment_objective(scout_cfg):
+        base = float(metrics.get("segment_weighted_hit_rate", np.nan))
+    else:
+        base = float(metrics.get("recall_min", np.nan))
+
+    if not np.isfinite(base):
+        return float("nan")
+    return float(
+        base
+        - float(scout_cfg.margin_gap_penalty) * gap
+        - float(scout_cfg.margin_prior_penalty) * prior_gap
+    )
+
+
 def fit_dcn_model(
     model_name: str,
     model_cfg: ModelConfig,
@@ -219,6 +309,9 @@ def fit_dcn_model(
     X_test: np.ndarray,
     y_test: np.ndarray,
     class_weights: np.ndarray,
+    train_frame: Optional[pd.DataFrame] = None,
+    val_frame: Optional[pd.DataFrame] = None,
+    test_frame: Optional[pd.DataFrame] = None,
     capture_predictions: bool = False,
 ) -> FitResult:
     """Train one model config and evaluate on train/val/test."""
@@ -286,6 +379,9 @@ def fit_dcn_model(
     hist_cutoff: List[float] = []
 
     t0 = time.perf_counter()
+    train_segments = _build_segments_for_objective(train_frame, scout_cfg=scout_cfg)
+    val_segments = _build_segments_for_objective(val_frame, scout_cfg=scout_cfg)
+    test_segments = _build_segments_for_objective(test_frame, scout_cfg=scout_cfg)
 
     for epoch in range(int(train_cfg.epochs)):
         train_loss = _train_one_epoch(
@@ -306,6 +402,7 @@ def fit_dcn_model(
             y_true=y_val,
             scout_cfg=scout_cfg,
             n_classes=n_classes,
+            val_segments=val_segments,
         )
 
         hist_loss.append(train_loss)
@@ -353,6 +450,14 @@ def fit_dcn_model(
     metrics_val = summarize_directional_metrics(y_true=y_val, y_pred=pred_val, n_classes=n_classes)
     metrics_test = summarize_directional_metrics(y_true=y_test, y_pred=pred_test, n_classes=n_classes)
 
+    metrics_train.update(_segment_metrics_for_pred(pred=pred_train, segments=train_segments))
+    metrics_val.update(_segment_metrics_for_pred(pred=pred_val, segments=val_segments))
+    metrics_test.update(_segment_metrics_for_pred(pred=pred_test, segments=test_segments))
+
+    metrics_train["cutoff_score"] = _cutoff_score_from_metrics(metrics_train, scout_cfg=scout_cfg)
+    metrics_val["cutoff_score"] = _cutoff_score_from_metrics(metrics_val, scout_cfg=scout_cfg)
+    metrics_test["cutoff_score"] = _cutoff_score_from_metrics(metrics_test, scout_cfg=scout_cfg)
+
     elapsed = time.perf_counter() - t0
 
     history = {
@@ -368,6 +473,7 @@ def fit_dcn_model(
         best_val_score=best_val_score,
         best_margin=best_cutoff,
         cutoff_kind=best_cutoff_kind,
+        cutoff_objective=str(getattr(scout_cfg, "cutoff_objective", "recall_balance")),
         train_loss_last=float(hist_loss[-1]) if hist_loss else float("nan"),
         train_metrics=metrics_train,
         val_metrics=metrics_val,

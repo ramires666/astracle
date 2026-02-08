@@ -79,6 +79,7 @@ def _result_to_row(
         "embed_dim": int(model_cfg.embed_dim),
         "hidden_dims": "x".join(str(v) for v in model_cfg.hidden_dims),
         "cutoff_kind": str(result.cutoff_kind),
+        "cutoff_objective": str(result.cutoff_objective),
         "best_epoch": int(result.best_epoch),
         "best_margin": float(result.best_margin),
         "best_val_score": float(result.best_val_score),
@@ -110,6 +111,9 @@ def run_quick_scout(
 
     split = build_time_split(n_rows=len(dataset.y), cfg=scout_cfg.split)
     summary = split_summary(dataset=dataset, split=split)
+    train_frame = dataset.dataframe.iloc[split.train_idx].copy()
+    val_frame = dataset.dataframe.iloc[split.val_idx].copy()
+    test_frame = dataset.dataframe.iloc[split.test_idx].copy()
 
     n_classes = int(np.max(dataset.y) + 1)
     prepared = prepare_split(
@@ -149,6 +153,9 @@ def run_quick_scout(
                 X_test=prepared.X_test,
                 y_test=prepared.y_test,
                 class_weights=prepared.class_weights,
+                train_frame=train_frame,
+                val_frame=val_frame,
+                test_frame=test_frame,
             )
 
             rows.append(
@@ -164,10 +171,21 @@ def run_quick_scout(
 
     results = pd.DataFrame(rows)
     if len(results):
-        results = results.sort_values(
-            by=["test_recall_min", "test_mcc", "test_acc"],
-            ascending=[False, False, False],
-        ).reset_index(drop=True)
+        order: List[str] = []
+        asc: List[bool] = []
+        if "test_cutoff_score" in results.columns:
+            order.append("test_cutoff_score")
+            asc.append(False)
+        for col, is_asc in [
+            ("test_recall_min", False),
+            ("test_recall_gap", True),
+            ("test_mcc", False),
+            ("test_acc", False),
+        ]:
+            if col in results.columns:
+                order.append(col)
+                asc.append(is_asc)
+        results = results.sort_values(by=order, ascending=asc).reset_index(drop=True)
 
     meta = {
         "split_summary": summary,

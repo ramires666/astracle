@@ -32,11 +32,12 @@ def _sorted_results(results: pd.DataFrame) -> pd.DataFrame:
     if results.empty:
         return results.copy()
 
-    order = [c for c in ["test_recall_min", "test_mcc", "test_acc"] if c in results.columns]
+    order = [c for c in ["test_cutoff_score", "test_recall_min", "test_mcc", "test_acc"] if c in results.columns]
     if not order:
         return results.reset_index(drop=True)
 
-    return results.sort_values(by=order, ascending=[False] * len(order)).reset_index(drop=True)
+    asc = [False if c != "test_recall_gap" else True for c in order]
+    return results.sort_values(by=order, ascending=asc).reset_index(drop=True)
 
 
 def _extract_confusion_matrix(row: pd.Series, split_name: str) -> np.ndarray | None:
@@ -91,6 +92,9 @@ def _split_metrics_table(row: pd.Series, splits: List[str]) -> pd.DataFrame:
                 "recall_up": float(row.get(f"{split}_recall_up", np.nan)),
                 "recall_min": float(row.get(f"{split}_recall_min", np.nan)),
                 "recall_gap": float(row.get(f"{split}_recall_gap", np.nan)),
+                "cutoff_score": float(row.get(f"{split}_cutoff_score", np.nan)),
+                "segment_weighted_hit_rate": float(row.get(f"{split}_segment_weighted_hit_rate", np.nan)),
+                "segment_weighted_majority_hit": float(row.get(f"{split}_segment_weighted_majority_hit", np.nan)),
                 "true_down_share": float(row.get(f"{split}_true_down_share", np.nan)),
                 "true_up_share": float(row.get(f"{split}_true_up_share", np.nan)),
                 "pred_down_share": float(row.get(f"{split}_pred_down_share", np.nan)),
@@ -210,9 +214,13 @@ def render_postrun_report(
             "model_type",
             "seed",
             "cutoff_kind",
+            "cutoff_objective",
             "best_epoch",
             "best_margin",
             "best_val_score",
+            "test_cutoff_score",
+            "test_segment_weighted_hit_rate",
+            "test_segment_weighted_majority_hit",
             "test_recall_down",
             "test_recall_up",
             "test_recall_min",

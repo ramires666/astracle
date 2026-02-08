@@ -39,6 +39,20 @@ def parse_args() -> argparse.Namespace:
         default=[42, 43],
         help="Random seeds for repeated short runs",
     )
+    p.add_argument(
+        "--cutoff-objective",
+        type=str,
+        choices=["recall_balance", "segment_weighted"],
+        default="recall_balance",
+        help="Threshold objective: classic recall balance or TP-segment weighted reward",
+    )
+    p.add_argument("--segment-score-gamma", type=float, default=1.5, help="TP segment amplitude exponent gamma")
+    p.add_argument("--segment-min-days", type=int, default=5, help="Minimum TP segment days")
+    p.add_argument(
+        "--segment-no-open-tail",
+        action="store_true",
+        help="Disable open-tail segment in TP segment-weighted objective",
+    )
     p.add_argument("--out-csv", type=str, default=None, help="Optional output CSV")
     return p.parse_args()
 
@@ -62,7 +76,13 @@ def main() -> None:
     train_cfg = with_epochs(TrainConfig(), int(args.epochs))
     train_cfg = with_batch_size(train_cfg, int(args.batch_size))
 
-    scout_cfg = ScoutConfig(train=train_cfg)
+    scout_cfg = ScoutConfig(
+        train=train_cfg,
+        cutoff_objective=str(args.cutoff_objective),
+        segment_score_gamma=float(args.segment_score_gamma),
+        segment_min_days=int(args.segment_min_days),
+        segment_include_open_tail=not bool(args.segment_no_open_tail),
+    )
 
     print("[quick_scout] loading dataset:", ds_cfg.dataset_path)
     data = load_tabular_dataset(ds_cfg)
@@ -85,13 +105,18 @@ def main() -> None:
         "model_type",
         "seed",
         "cutoff_kind",
+        "cutoff_objective",
         "best_margin",
         "best_val_score",
+        "test_cutoff_score",
+        "test_segment_weighted_hit_rate",
+        "test_segment_weighted_majority_hit",
         "test_recall_min",
         "test_recall_gap",
         "test_mcc",
         "test_acc",
     ]
+    cols = [c for c in cols if c in results.columns]
     print(results[cols].head(10).to_string(index=False))
 
     bounds = suggest_tuning_bounds(results, top_k=3)

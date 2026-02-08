@@ -16,12 +16,15 @@ This folder contains a new CUDA-first neural research direction for astro-only t
 - `model_dcn.py`: low-rank cross network + residual MLP architecture.
 - `model_deepfm.py`: DeepFM-style interaction network for tabular astro signals.
 - `metrics_numba.py`: Numba-accelerated margin scan and metrics helpers.
+- `segment_weighted.py`: TP segment-weighted scoring utilities ported from old TP notebook.
 - `trainer.py`: CUDA AMP training loop with early stopping.
 - `experiments.py`: quick scout run orchestration and rough tuning bound suggestions.
 - `quick_scout.py`: CLI entrypoint for short multi-run scouting.
 - `grid_search.py`: broad trial search over architecture + training hyperparameters.
 - `grid_trial.py`: CLI entrypoint for sampled broad grid-search trial.
 - `postrun_report.py`: default notebook post-run visual diagnostics (confusion matrix + class balance + up/down recall).
+- `price_event_report.py`: builds test-period price/event alignment charts and writes markdown with embedded PNG charts.
+- `winner_grid_report.py`: builds winner-grid markdown summary with embedded comparative charts.
 - `astro_tabular_nn_quick_scout.ipynb`: notebook for initial exploratory runs.
 - `astro_tabular_nn_grid_trial.ipynb`: notebook for sampled broad grid trial.
 - `research-history.md`: chronological log of research steps and reproducibility notes.
@@ -36,6 +39,9 @@ python -m RESEARCH.astro_tabular_nn.quick_scout \
   --epochs 8 \
   --batch-size 512 \
   --seeds 42 43 \
+  --cutoff-objective segment_weighted \
+  --segment-score-gamma 1.5 \
+  --segment-min-days 5 \
   --out-csv RESEARCH/reports/astro_tabular_nn_quick_scout.csv
 ```
 
@@ -48,8 +54,25 @@ python -m RESEARCH.astro_tabular_nn.grid_trial \
   --n-trials 24 \
   --model-types dcn deepfm \
   --seeds 42 \
+  --cutoff-objective segment_weighted \
+  --segment-score-gamma 1.5 \
+  --segment-min-days 5 \
   --sample-seed 1729 \
   --out-csv RESEARCH/reports/astro_tabular_nn_grid_trial.csv
+```
+
+```bash
+python -m RESEARCH.astro_tabular_nn.price_event_report \
+  --selected-csv RESEARCH/reports/astro_tabular_nn_postrun_wide_balance_20260208_055915/selected_models.csv \
+  --top-k 5 \
+  --out-dir RESEARCH/reports/astro_tabular_nn_price_event_report_latest
+```
+
+```bash
+python -m RESEARCH.astro_tabular_nn.winner_grid_report \
+  --grid-csv RESEARCH/reports/astro_tabular_nn_grid_winner_dcn_balance_e8_t72_s2_20260208_062409.csv \
+  --baseline-selected-csv RESEARCH/reports/astro_tabular_nn_postrun_wide_balance_20260208_055915/selected_models.csv \
+  --out-dir RESEARCH/reports/astro_tabular_nn_winner_grid_report_latest
 ```
 
 ## Notes
@@ -59,5 +82,7 @@ python -m RESEARCH.astro_tabular_nn.grid_trial \
 - Suggested bounds from scout output are only a starting point for deeper tuning.
 - `grid_trial` now supports two architectures: `dcn` and `deepfm`.
 - For `best-grid` dataset, target is binary and trainer uses threshold search (not ternary margin).
+- `cutoff_objective=segment_weighted` uses TP segment reward (`weighted_hit_rate`) with class-gap penalties.
 - `next_ret` and target-side helper columns are excluded from features to avoid leakage.
 - Notebooks now run post-run diagnostics by default immediately after each trial/scout run.
+- `price_event_report` and `winner_grid_report` markdown outputs now embed chart images directly (`![...](png)`).

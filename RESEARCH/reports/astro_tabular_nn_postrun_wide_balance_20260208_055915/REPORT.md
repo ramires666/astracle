@@ -58,3 +58,25 @@ dcn_high_dropout        dcn    45         0.61          0.4590            0.7381
 deepfm_wider_mlp     deepfm    43         0.50          0.4597            0.8442          0.3333           0.3333           0.5109    0.0678    0.8341
  dcn_cross_light        dcn    45         0.89          0.4066            0.8600          0.3333           0.3333           0.5267    0.0770    0.8496
 ```
+
+## Charts
+
+### Rank 1: `dcn_dropout_high` (seed `45`)
+
+![rank01_dcn_dropout_high_seed45](model_rank01_dcn_dropout_high_seed45_diagnostics.png)
+
+### Rank 2: `dcn_cross_heavy` (seed `44`)
+
+![rank02_dcn_cross_heavy_seed44](model_rank02_dcn_cross_heavy_seed44_diagnostics.png)
+
+### Rank 3: `deepfm_embed128` (seed `45`)
+
+![rank03_deepfm_embed128_seed45](model_rank03_deepfm_embed128_seed45_diagnostics.png)
+
+### Rank 4: `deepfm_narrow` (seed `43`)
+
+![rank04_deepfm_narrow_seed43](model_rank04_deepfm_narrow_seed43_diagnostics.png)
+
+### Rank 5: `deepfm_narrow` (seed `45`)
+
+![rank05_deepfm_narrow_seed45](model_rank05_deepfm_narrow_seed45_diagnostics.png)

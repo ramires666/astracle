@@ -148,6 +148,22 @@ function buildSplitSegments(backtestSlice) {
     return segments;
 }
 
+function dedupeForecastByDate(rows) {
+    // Defensive dedupe:
+    // Some cache refresh cycles may temporarily expose repeated forecast dates.
+    // We keep only the first row for each calendar date to avoid duplicate tooltip lines.
+    const input = Array.isArray(rows) ? rows : [];
+    const seen = new Set();
+    const out = [];
+    for (const row of input) {
+        const key = String(row?.date || '');
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(row);
+    }
+    return out;
+}
+
 function buildPredictionBackgroundPlugin() {
     return {
         id: 'predictionBackground',
@@ -156,7 +172,7 @@ function buildPredictionBackgroundPlugin() {
             if (!chartArea || !scales?.x) return;
 
             const backtestSlice = state.cachedBacktest.slice(-state.backtestDays);
-            const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
+            const forecastSlice = dedupeForecastByDate(state.cachedForecast.slice(0, state.forecastDays));
             const allPredictions = [
                 ...backtestSlice.map((p) => ({ ...p, isPast: true })),
                 ...forecastSlice.map((p) => ({ ...p, isPast: false })),
@@ -308,7 +324,7 @@ export function initializeChart() {
     const ctx = elements.chartCanvas.getContext('2d');
 
     const backtestSlice = state.cachedBacktest.slice(-state.backtestDays);
-    const forecastSlice = state.cachedForecast.slice(0, state.forecastDays);
+    const forecastSlice = dedupeForecastByDate(state.cachedForecast.slice(0, state.forecastDays));
     // Actual line source priority:
     // 1) Fresh market prices from /api/historical (can be newer than backtest cache)
     // 2) Fallback to actual_price embedded in backtest cache
@@ -427,9 +443,7 @@ export function initializeChart() {
 
                                 if (row) {
                                     const split = row.split ? row.split.toUpperCase() : 'UNKNOWN';
-                                    const conf = ((row.confidence ?? 0.5) * 100).toFixed(1);
                                     lines.push(`Split: ${split}`);
-                                    lines.push(`Pred: ${row.direction} (${conf}%)`);
                                     if (row.actual_direction) lines.push(`Actual Label: ${row.actual_direction}`);
                                     if (row.correct === true) lines.push('Correct: YES');
                                     if (row.correct === false) lines.push('Correct: NO');

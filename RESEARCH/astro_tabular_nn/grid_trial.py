@@ -48,6 +48,20 @@ def parse_args() -> argparse.Namespace:
         default=[42],
         help="Training seeds",
     )
+    p.add_argument(
+        "--cutoff-objective",
+        type=str,
+        choices=["recall_balance", "segment_weighted"],
+        default="recall_balance",
+        help="Threshold objective for validation cutoff search",
+    )
+    p.add_argument("--segment-score-gamma", type=float, default=1.5, help="TP segment amplitude exponent gamma")
+    p.add_argument("--segment-min-days", type=int, default=5, help="Minimum TP segment days")
+    p.add_argument(
+        "--segment-no-open-tail",
+        action="store_true",
+        help="Disable open-tail segment in TP segment-weighted objective",
+    )
     p.add_argument("--sample-seed", type=int, default=1729, help="Seed for candidate sampling")
     p.add_argument("--out-csv", type=str, required=True, help="Output CSV for grid results")
     return p.parse_args()
@@ -71,7 +85,13 @@ def main() -> None:
     ds_cfg = with_dataset(DatasetConfig(), dataset_path)
     train_cfg = with_epochs(TrainConfig(), int(args.epochs))
     train_cfg = with_batch_size(train_cfg, int(args.batch_size))
-    scout_cfg = ScoutConfig(train=train_cfg)
+    scout_cfg = ScoutConfig(
+        train=train_cfg,
+        cutoff_objective=str(args.cutoff_objective),
+        segment_score_gamma=float(args.segment_score_gamma),
+        segment_min_days=int(args.segment_min_days),
+        segment_include_open_tail=not bool(args.segment_no_open_tail),
+    )
     model_types = tuple(str(v).lower().strip() for v in args.model_types)
     space = replace(GridSearchSpace(), model_types=model_types)
 
@@ -111,13 +131,18 @@ def main() -> None:
         "label_smoothing",
         "batch_size",
         "cutoff_kind",
+        "cutoff_objective",
         "best_margin",
         "best_val_score",
+        "test_cutoff_score",
+        "test_segment_weighted_hit_rate",
+        "test_segment_weighted_majority_hit",
         "test_recall_min",
         "test_recall_gap",
         "test_mcc",
         "test_acc",
     ]
+    cols = [c for c in cols if c in results.columns]
     print(results[cols].head(12).to_string(index=False))
     print("\n[grid_trial] saved:", out_csv)
 

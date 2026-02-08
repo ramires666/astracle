@@ -1,0 +1,118 @@
+{
+  "out_csv": "RESEARCH/reports/astro_tabular_nn_grid_winner_dcn_balance_e8_t72_s2_20260208_062409.csv",
+  "out_top15_csv": "RESEARCH/reports/astro_tabular_nn_grid_winner_dcn_balance_e8_t72_s2_20260208_062409.top15.csv",
+  "dataset_path": "/home/rut/ostrofun/RESEARCH/cache/astro_tabular_nn_best_grid__dataset__0faeef66.parquet",
+  "n_trials": 72,
+  "seeds": [
+    44,
+    45
+  ],
+  "total_runs": 144,
+  "sample_seed": 20260208,
+  "threshold_grid_len": 81,
+  "margin_gap_penalty": 0.7,
+  "margin_prior_penalty": 0.12,
+  "space": {
+    "model_types": [
+      "dcn"
+    ],
+    "hidden_dims": [
+      [
+        256,
+        128
+      ],
+      [
+        384,
+        192,
+        96
+      ],
+      [
+        512,
+        256,
+        128
+      ],
+      [
+        640,
+        320,
+        160
+      ]
+    ],
+    "dropout": [
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45
+    ],
+    "cross_layers": [
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "cross_rank": [
+      32,
+      48,
+      64,
+      96,
+      128
+    ],
+    "learning_rate": [
+      0.0003,
+      0.0005,
+      0.0008,
+      0.001,
+      0.0015
+    ],
+    "weight_decay": [
+      1e-05,
+      5e-05,
+      0.0001,
+      0.0003,
+      0.0005
+    ],
+    "class_weight_power": [
+      1.2,
+      1.3,
+      1.4,
+      1.5,
+      1.6
+    ],
+    "label_smoothing": [
+      0.0,
+      0.01,
+      0.02,
+      0.05
+    ],
+    "batch_size": [
+      384,
+      512,
+      768
+    ]
+  },
+  "split_summary": {
+    "rows_total": 3009,
+    "features": 2670,
+    "train_rows": 2106,
+    "val_rows": 451,
+    "test_rows": 452,
+    "target_share_train": {
+      "0": 0.5598290598290598,
+      "1": 0.44017094017094016
+    },
+    "target_share_val": {
+      "0": 0.5388026607538803,
+      "1": 0.4611973392461197
+    },
+    "target_share_test": {
+      "0": 0.9800884955752213,
+      "1": 0.01991150442477876
+    },
+    "date_start": "2017-11-12",
+    "date_end": "2026-02-06",
+    "mean_zero_fraction": 0.9224500032984692
+  },
+  "candidate_pool_size": 750000,
+  "n_trials_effective": 72
+}

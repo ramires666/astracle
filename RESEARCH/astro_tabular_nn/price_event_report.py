@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -144,6 +145,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tp-tail-direction-mode", type=str, default="endpoint_sign")
     p.add_argument("--tp-tail-min-move-pct", type=float, default=0.0)
     return p
+
+
+def _to_report_relative_path(path_value: Any, report_dir: Path) -> str:
+    raw = Path(str(path_value))
+    try:
+        if raw.is_absolute():
+            return raw.relative_to(report_dir).as_posix()
+        return raw.relative_to(report_dir).as_posix()
+    except Exception:
+        try:
+            return Path(os.path.relpath(str(raw), start=str(report_dir))).as_posix()
+        except Exception:
+            return raw.as_posix()
 
 
 def main() -> None:
@@ -302,6 +316,27 @@ def main() -> None:
     summary_path = out_dir / "summary.csv"
     summary.to_csv(summary_path, index=False)
 
+    chart_lines = ["## Charts", ""]
+    for _, row in summary.iterrows():
+        rank = int(row["global_rank"])
+        model = str(row["model"])
+        seed = int(row["seed"])
+        rel_plot = _to_report_relative_path(row["plot_path"], out_dir)
+        lag = float(row["event_mean_abs_lag_days"])
+        lag_text = "n/a" if not np.isfinite(lag) else f"{lag:.2f}"
+        chart_lines.extend(
+            [
+                f"### Rank {rank}: `{model}` (seed `{seed}`)",
+                "",
+                f"- Event recall (true): `{float(row['event_recall_true']):.4f}`",
+                f"- Event precision (pred): `{float(row['event_precision_pred']):.4f}`",
+                f"- Mean abs lag (days): `{lag_text}`",
+                "",
+                f"![rank{rank:02d}_{model}_seed{seed}]({rel_plot})",
+                "",
+            ]
+        )
+
     report_lines = [
         "# Price Event Alignment Report",
         "",
@@ -314,6 +349,8 @@ def main() -> None:
         "## Summary",
         "",
         summary.to_string(index=False),
+        "",
+        *chart_lines,
     ]
     (out_dir / "REPORT.md").write_text("\n".join(report_lines), encoding="utf-8")
 
@@ -325,4 +362,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -14,3 +14,45 @@
            3  deepfm_embed128     deepfm    45         0.589165         0.188613  0.103923  0.592920           0.000000              0.000000                      NaN              6              1                 0  RESEARCH/reports/astro_tabular_nn_price_event_report_20260208_061726/rank03_deepfm_embed128_seed45_price_event_alignment.png
            4    deepfm_narrow     deepfm    43         0.555556         0.397040  0.304877  0.944690           0.000000              0.000000                      NaN              6              1                 0    RESEARCH/reports/astro_tabular_nn_price_event_report_20260208_061726/rank04_deepfm_narrow_seed43_price_event_alignment.png
            5    deepfm_narrow     deepfm    45         0.444444         0.273389  0.050198  0.712389           0.000000              0.000000                      NaN              6              2                 0    RESEARCH/reports/astro_tabular_nn_price_event_report_20260208_061726/rank05_deepfm_narrow_seed45_price_event_alignment.png
+
+## Charts
+
+### Rank 1: `dcn_dropout_high` (seed `45`)
+
+- Event recall (true): `0.1667`
+- Event precision (pred): `0.3333`
+- Mean abs lag (days): `7.00`
+
+![rank01_dcn_dropout_high_seed45](rank01_dcn_dropout_high_seed45_price_event_alignment.png)
+
+### Rank 2: `dcn_cross_heavy` (seed `44`)
+
+- Event recall (true): `0.1667`
+- Event precision (pred): `0.2500`
+- Mean abs lag (days): `0.00`
+
+![rank02_dcn_cross_heavy_seed44](rank02_dcn_cross_heavy_seed44_price_event_alignment.png)
+
+### Rank 3: `deepfm_embed128` (seed `45`)
+
+- Event recall (true): `0.0000`
+- Event precision (pred): `0.0000`
+- Mean abs lag (days): `n/a`
+
+![rank03_deepfm_embed128_seed45](rank03_deepfm_embed128_seed45_price_event_alignment.png)
+
+### Rank 4: `deepfm_narrow` (seed `43`)
+
+- Event recall (true): `0.0000`
+- Event precision (pred): `0.0000`
+- Mean abs lag (days): `n/a`
+
+![rank04_deepfm_narrow_seed43](rank04_deepfm_narrow_seed43_price_event_alignment.png)
+
+### Rank 5: `deepfm_narrow` (seed `45`)
+
+- Event recall (true): `0.0000`
+- Event precision (pred): `0.0000`
+- Mean abs lag (days): `n/a`
+
+![rank05_deepfm_narrow_seed45](rank05_deepfm_narrow_seed45_price_event_alignment.png)

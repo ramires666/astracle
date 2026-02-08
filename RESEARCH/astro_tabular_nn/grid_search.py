@@ -70,6 +70,9 @@ class ScaledSplit:
     y_val: np.ndarray
     X_test: np.ndarray
     y_test: np.ndarray
+    train_idx: np.ndarray
+    val_idx: np.ndarray
+    test_idx: np.ndarray
 
 
 def build_candidate_pool(space: GridSearchSpace) -> List[GridRunSpec]:
@@ -211,6 +214,9 @@ def _make_scaled_split(dataset: LoadedDataset, scout_cfg: ScoutConfig) -> Tuple[
         y_val=y_val,
         X_test=X_test,
         y_test=y_test,
+        train_idx=split.train_idx,
+        val_idx=split.val_idx,
+        test_idx=split.test_idx,
     )
     return out, meta
 
@@ -279,6 +285,9 @@ def run_broad_grid_trial(
     sampled = sample_candidates(pool, n_trials=n_trials, seed=sample_seed)
 
     split_data, split_meta = _make_scaled_split(dataset, scout_cfg)
+    train_frame = dataset.dataframe.iloc[split_data.train_idx].copy()
+    val_frame = dataset.dataframe.iloc[split_data.val_idx].copy()
+    test_frame = dataset.dataframe.iloc[split_data.test_idx].copy()
 
     n_classes = int(np.max(dataset.y) + 1)
     rows: List[Dict[str, object]] = []
@@ -328,12 +337,16 @@ def run_broad_grid_trial(
                 X_test=split_data.X_test,
                 y_test=split_data.y_test,
                 class_weights=class_weights,
+                train_frame=train_frame,
+                val_frame=val_frame,
+                test_frame=test_frame,
             )
 
             row = _spec_to_row(spec=spec, seed=int(seed), run_id=int(run_id))
             row.update(
                 {
                     "cutoff_kind": str(fit.cutoff_kind),
+                    "cutoff_objective": str(fit.cutoff_objective),
                     "best_epoch": int(fit.best_epoch),
                     "best_margin": float(fit.best_margin),
                     "best_val_score": float(fit.best_val_score),
@@ -353,10 +366,21 @@ def run_broad_grid_trial(
 
     results = pd.DataFrame(rows)
     if len(results):
-        results = results.sort_values(
-            by=["test_recall_min", "test_mcc", "test_acc"],
-            ascending=[False, False, False],
-        ).reset_index(drop=True)
+        order: List[str] = []
+        asc: List[bool] = []
+        if "test_cutoff_score" in results.columns:
+            order.append("test_cutoff_score")
+            asc.append(False)
+        for col, is_asc in [
+            ("test_recall_min", False),
+            ("test_recall_gap", True),
+            ("test_mcc", False),
+            ("test_acc", False),
+        ]:
+            if col in results.columns:
+                order.append(col)
+                asc.append(is_asc)
+        results = results.sort_values(by=order, ascending=asc).reset_index(drop=True)
 
     meta = {
         "split_summary": split_meta,
