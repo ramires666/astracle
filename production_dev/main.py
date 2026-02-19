@@ -411,6 +411,16 @@ async def startup_event():
     print(f"🚀 Starting {APP_CONFIG['title']} v{APP_CONFIG['version']}")
     print(f"📡 API available at http://localhost:{APP_CONFIG['port']}")
     print(f"📊 Web UI available at http://localhost:{APP_CONFIG['port']}/")
+
+    # Seed empty bind-mounted storage from image snapshots.
+    try:
+        from production_dev.storage_bootstrap import ensure_runtime_storage_seed
+
+        seed_result = ensure_runtime_storage_seed(verbose=True)
+        if seed_result.get("market_seeded") or seed_result.get("prediction_cache_seeded"):
+            print(f"[STORAGE-BOOTSTRAP] Completed: {seed_result}")
+    except Exception as e:
+        print(f"⚠️ Storage bootstrap skipped: {e}")
     
     # Pre-load model
     try:

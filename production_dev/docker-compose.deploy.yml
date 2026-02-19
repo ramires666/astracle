@@ -1,0 +1,38 @@
+services:
+  btc-astro-predictor:
+    image: ${BACKEND_IMAGE:-ostrofun-backend:latest}
+    container_name: btc-astro-backend
+    expose:
+      - "9742"
+    volumes:
+      - ${STORAGE_ROOT:-./storage}/market:/app/data/market
+      - ${STORAGE_ROOT:-./storage}/prediction_cache:/app/data/prediction_cache
+      - ${STORAGE_ROOT:-./storage}/research_cache:/app/RESEARCH/cache
+    environment:
+      PYTHONPATH: /app
+      PORT: "9742"
+      SPLIT_MODEL_PATH: /app/models_artifacts/btc_astro_predictor.turning_split.joblib
+      FULL_MODEL_PATH: /app/models_artifacts/btc_astro_predictor.turning_full.joblib
+      ALLOW_LEGACY_MODEL_FALLBACK: ${ALLOW_LEGACY_MODEL_FALLBACK:-0}
+      LIVE_REFRESH_ENABLED: ${LIVE_REFRESH_ENABLED:-1}
+      LIVE_REFRESH_INTERVAL_SECONDS: ${LIVE_REFRESH_INTERVAL_SECONDS:-3600}
+      LIVE_REFRESH_PRICE_MOVE_THRESHOLD: ${LIVE_REFRESH_PRICE_MOVE_THRESHOLD:-0.03}
+      MARKET_UPDATE_ALLOW_BINANCE_FALLBACK: ${MARKET_UPDATE_ALLOW_BINANCE_FALLBACK:-0}
+      COINGECKO: ${COINGECKO:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9742/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  btc-astro-frontend:
+    image: ${FRONTEND_IMAGE:-ostrofun-frontend:latest}
+    container_name: btc-astro-frontend
+    depends_on:
+      btc-astro-predictor:
+        condition: service_healthy
+    ports:
+      - "${PUBLIC_PORT:-9742}:80"
+    restart: unless-stopped

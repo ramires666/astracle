@@ -34,3 +34,4 @@ old-project/
 *.parquet
 data/market/
 
+RESEARCH/cache/

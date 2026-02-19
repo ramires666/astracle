@@ -56,18 +56,18 @@ function diffDays(tsA, tsB) {
 }
 
 function clipHistoricalToBacktestRange(historicalRows, backtestSlice) {
-    // Keep actual-price line within the same date window as backtest labels.
-    // This avoids "left side without split bands" when sources have different ranges.
+    // Keep the left edge aligned with backtest start, but allow newer actual
+    // days on the right. This way users still see latest market data even if
+    // backtest cache lags behind by a few days.
     if (!Array.isArray(historicalRows) || historicalRows.length === 0) return [];
     if (!Array.isArray(backtestSlice) || backtestSlice.length === 0) return historicalRows;
 
     const startTs = toTimeValue(backtestSlice[0].date);
-    const endTs = toTimeValue(backtestSlice[backtestSlice.length - 1].date);
-    if (!Number.isFinite(startTs) || !Number.isFinite(endTs)) return historicalRows;
+    if (!Number.isFinite(startTs)) return historicalRows;
 
     const clipped = historicalRows.filter((row) => {
         const ts = toTimeValue(row?.date);
-        return Number.isFinite(ts) && ts >= startTs && ts <= endTs;
+        return Number.isFinite(ts) && ts >= startTs;
     });
 
     // Fallback to original data if clipping produced nothing.
@@ -153,8 +153,9 @@ function dedupeForecastByDate(rows) {
     const input = Array.isArray(rows) ? rows : [];
     const byDay = new Map();
     for (const row of input) {
-        const key = toIsoDateLocal(new Date(toTimeValue(row?.date)));
-        if (!key) continue;
+        const ts = toTimeValue(row?.date);
+        if (!Number.isFinite(ts)) continue;
+        const key = toIsoDateLocal(new Date(ts));
         const prev = byDay.get(key);
         // Prefer explicit "now anchor" when duplicate day appears.
         if (!prev || row?.is_now_anchor === true) {
@@ -403,10 +404,8 @@ export function initializeChart() {
             responsive: true,
             maintainAspectRatio: false,
             animation: { duration: CONFIG.CHART_ANIMATION_DURATION },
-            // IMPORTANT:
-            // We use `mode: "x"` so the tooltip matches points by *date* (x value),
-            // NOT by array index. Index-based tooltips can incorrectly show an
-            // "Actual Price" value for a future forecast day (because dataset lengths differ).
+            // Keep tooltip pinned to one nearest day on the x-axis.
+            // This prevents duplicate blocks in the info-box when datasets overlap.
             interaction: { intersect: false, mode: 'nearest', axis: 'x' },
             plugins: {
                 legend: {
@@ -425,7 +424,7 @@ export function initializeChart() {
                     borderColor: 'rgba(255, 255, 255, 0.1)',
                     borderWidth: 1,
                     padding: 12,
-                    displayColors: true,
+                    displayColors: false,
                     mode: 'nearest',
                     intersect: false,
                     callbacks: {

@@ -91,7 +91,8 @@ class HourlyRefreshService:
 
         self._stop_event.clear()
         await asyncio.to_thread(self._prepare_acceleration)
-        await self.run_once(trigger="startup")
+        # Do not block API startup on a potentially long first refresh cycle.
+        # _run_loop executes run_once() immediately in background.
         self._task = asyncio.create_task(self._run_loop(), name="hourly-forecast-refresh")
         print(
             f"✅ Hourly refresh started: interval={self.interval_seconds}s "
@@ -141,9 +142,26 @@ class HourlyRefreshService:
         market_status = "not_checked"
 
         latest_market_date = self._load_latest_market_date()
+        needs_market_bootstrap = latest_market_date is None
         is_future_gap = bool(latest_market_date and now.date() > latest_market_date)
 
-        if is_future_gap:
+        if needs_market_bootstrap:
+            print("📦 Local market snapshot not found. Bootstrapping market data from source...")
+            try:
+                update_result = update_full_market_data(progress=False, verbose=True)
+                market_status = str(update_result.get("status", "unknown"))
+                latest_market_date = self._load_latest_market_date()
+                is_future_gap = bool(latest_market_date and now.date() > latest_market_date)
+                if latest_market_date is not None:
+                    action = "forecast_rebuild"
+                    reason = "market_bootstrap"
+                    print("📥 Market bootstrap completed. Rebuilding forecast cache...")
+                else:
+                    print("ℹ️ Market bootstrap finished, but no local closed rows found yet.")
+            except Exception as e:
+                market_status = f"error:{e}"
+                print(f"⚠️ Market bootstrap failed: {e}")
+        elif is_future_gap:
             print(
                 f"⏳ Market lag detected: latest={latest_market_date.isoformat()} "
                 f"today={now.date().isoformat()}. Checking new data availability..."

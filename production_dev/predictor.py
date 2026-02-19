@@ -71,6 +71,9 @@ class BtcAstroPredictor:
         # We also apply a small asymmetry (UP days a bit stronger than DOWN),
         # because on BTC daily closes (2017-2025) the average absolute UP move
         # was ~7% larger than the average absolute DOWN move.
+        # `sim_speed_scale` controls overall slope steepness of forecast line.
+        # 0.33 means roughly 3x slower day-to-day movement versus raw settings.
+        "sim_speed_scale": 0.33,
         "sim_base_move": 0.006,   # ~0.6% minimum daily move when confidence=50%
         "sim_conf_move": 0.020,   # +0%..+2.0% extra move when confidence goes 50%->100%
         "sim_jitter": 0.008,      # ±0.8% random noise for natural look
@@ -372,8 +375,10 @@ class BtcAstroPredictor:
             # - Extra move is proportional to confidence_strength
             #
             # These constants are UI-only (see DEFAULT_CONFIG).
-            base_move = float(self.config.get("sim_base_move", 0.006))
-            conf_move = float(self.config.get("sim_conf_move", 0.020))
+            speed_scale = float(self.config.get("sim_speed_scale", 0.33))
+            speed_scale = float(np.clip(speed_scale, 0.05, 2.0))
+            base_move = float(self.config.get("sim_base_move", 0.006)) * speed_scale
+            conf_move = float(self.config.get("sim_conf_move", 0.020)) * speed_scale
             move_percent = base_move + conf_move * confidence_strength
 
             # Small asymmetry: UP days are a bit stronger than DOWN days.
@@ -385,7 +390,7 @@ class BtcAstroPredictor:
             
             # Random jitter for a more natural line.
             # We keep it symmetric so we don't accidentally add hidden drift.
-            jitter_amp = float(self.config.get("sim_jitter", 0.008))
+            jitter_amp = float(self.config.get("sim_jitter", 0.008)) * speed_scale
             jitter = np.random.uniform(-jitter_amp, jitter_amp)
 
             price_change = direction * move_percent + jitter

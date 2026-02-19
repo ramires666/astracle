@@ -9,17 +9,16 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.5.0
 
 # ML & Data Processing
-xgboost>=2.0.0
+xgboost==2.0.3
 scikit-learn>=1.4.0
 numpy>=1.26.0
 pandas>=2.1.0
+pyarrow>=17.0.0
 joblib>=1.3.0
+tqdm>=4.66.0
 
 # Ephemeris Calculations
 pyswisseph>=2.10.0
-
-# Database Connection (same as RESEARCH)
-psycopg2-binary>=2.9.9
 
 # HTTP Client for external APIs
 requests>=2.31.0
