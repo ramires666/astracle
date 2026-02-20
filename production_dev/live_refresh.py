@@ -68,7 +68,8 @@ class HourlyRefreshService:
         price_change_threshold: float = 0.03,
     ):
         self._predictor_factory = predictor_factory
-        self.interval_seconds = max(60, int(interval_seconds))
+        # Allow faster refresh cycles for near-real-time deployments.
+        self.interval_seconds = max(30, int(interval_seconds))
         self.price_change_threshold = max(0.0, float(price_change_threshold))
 
         self._task: Optional[asyncio.Task] = None

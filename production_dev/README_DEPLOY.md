@@ -5,6 +5,16 @@ This guide covers:
 - image transfer to Linux server
 - deploy from `/home/user/GROM/ostrofun`
 - persistent storage for market/cache data
+- deployment with prebuilt image tar files
+
+Registry-based deploy:
+- `production_dev/README_REGISTRY_ONPREM.md` (self-hosted private registry with HTTPS)
+
+Simple no-registry deploy scripts:
+- `production_dev/README_DEPLOY_NO_REGISTRY.md`
+
+Frontend protection with Fail2Ban:
+- `production_dev/security/fail2ban/README.md`
 
 Deployment compose file:
 - `production_dev/docker-compose.deploy.yml`
@@ -103,7 +113,7 @@ PUBLIC_PORT=9742
 STORAGE_ROOT=./storage
 ALLOW_LEGACY_MODEL_FALLBACK=0
 LIVE_REFRESH_ENABLED=1
-LIVE_REFRESH_INTERVAL_SECONDS=3600
+LIVE_REFRESH_INTERVAL_SECONDS=30
 LIVE_REFRESH_PRICE_MOVE_THRESHOLD=0.03
 MARKET_UPDATE_ALLOW_BINANCE_FALLBACK=0
 COINGECKO=

@@ -15,7 +15,7 @@ services:
       FULL_MODEL_PATH: /app/models_artifacts/btc_astro_predictor.turning_full.joblib
       ALLOW_LEGACY_MODEL_FALLBACK: ${ALLOW_LEGACY_MODEL_FALLBACK:-0}
       LIVE_REFRESH_ENABLED: ${LIVE_REFRESH_ENABLED:-1}
-      LIVE_REFRESH_INTERVAL_SECONDS: ${LIVE_REFRESH_INTERVAL_SECONDS:-3600}
+      LIVE_REFRESH_INTERVAL_SECONDS: ${LIVE_REFRESH_INTERVAL_SECONDS:-30}
       LIVE_REFRESH_PRICE_MOVE_THRESHOLD: ${LIVE_REFRESH_PRICE_MOVE_THRESHOLD:-0.03}
       MARKET_UPDATE_ALLOW_BINANCE_FALLBACK: ${MARKET_UPDATE_ALLOW_BINANCE_FALLBACK:-0}
       COINGECKO: ${COINGECKO:-}
@@ -35,4 +35,6 @@ services:
         condition: service_healthy
     ports:
       - "${PUBLIC_PORT:-9742}:80"
+    volumes:
+      - ./security/nginx-logs:/var/log/nginx
     restart: unless-stopped

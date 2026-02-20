@@ -22,9 +22,18 @@
 }
 
 .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 0.75rem;
     padding: 0.25rem 0.5rem;
     border-radius: var(--radius-sm);
+}
+
+.legend-item [data-lucide] {
+    width: 0.9rem;
+    height: 0.9rem;
+    stroke-width: 2.2;
 }
 
 .legend-item.up {
@@ -218,6 +227,18 @@ tr:hover {
     font-weight: 600;
 }
 
+.direction-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.direction-icon {
+    width: 0.9rem;
+    height: 0.9rem;
+    stroke-width: 2.2;
+}
+
 /* =============================================================================
    FOOTER
    ============================================================================= */
@@ -233,6 +254,21 @@ tr:hover {
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-bottom: var(--spacing-xs);
+}
+
+.footer-warning {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+}
+
+.footer-warning [data-lucide] {
+    width: 0.95rem;
+    height: 0.95rem;
+    color: var(--accent-gold);
+    stroke-width: 2.1;
+    flex-shrink: 0;
 }
 
 .footer-meta {

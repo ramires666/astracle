@@ -32,3 +32,4 @@ storage/**
 storage*/**
 production_dev/storage/**
 production_dev/storage*/**
+production_dev/security/nginx-logs/**

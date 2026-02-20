@@ -19,6 +19,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script
         src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/styles.css">
@@ -34,7 +35,9 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <span class="logo-icon">☿</span>
+                <span class="logo-icon" aria-hidden="true">
+                    <i data-lucide="orbit"></i>
+                </span>
                 <div class="logo-text">
                     <h1>Bitcoin Astro Predictor</h1>
                     <p class="tagline">AI-Powered Price Direction Forecast</p>
@@ -47,12 +50,8 @@
                     <span class="v2-live-item" id="v2-live-eval">eval_id: --</span>
                     <span class="v2-live-item" id="v2-live-cache">cache: --</span>
                 </div>
-                <a
-                    class="v2-doc-link"
-                    href="/static/research/v2_tp_segment_weighted_brief.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
+                <a class="v2-doc-link" href="/static/research/v2_tp_segment_weighted_brief.html" target="_blank"
+                    rel="noopener noreferrer">
                     Version 2 Scientific Brief
                 </a>
             </div>
@@ -128,7 +127,10 @@
         <!-- Model Info Card -->
         <section class="model-card glass">
             <div class="model-header">
-                <h2>📊 Model Configuration</h2>
+                <h2 class="section-title">
+                    <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+                    <span>Model Configuration</span>
+                </h2>
                 <span class="model-badge" id="accuracy-badge">R_MIN: --</span>
             </div>
             <div class="model-details" id="model-details">
@@ -168,7 +170,9 @@
                 </div>
             </div>
             <button class="btn-primary" id="predict-btn">
-                <span class="btn-icon">🔮</span>
+                <span class="btn-icon" aria-hidden="true">
+                    <i data-lucide="sparkles"></i>
+                </span>
                 Generate Forecast
             </button>
         </section>
@@ -176,10 +180,19 @@
         <!-- Chart Section -->
         <section class="chart-section glass">
             <div class="chart-header">
-                <h2>📈 Price Prediction Chart</h2>
+                <h2 class="section-title">
+                    <i data-lucide="trending-up" aria-hidden="true"></i>
+                    <span>Price Prediction Chart</span>
+                </h2>
                 <div class="chart-legend">
-                    <span class="legend-item up">▲ UP Day</span>
-                    <span class="legend-item down">▼ DOWN Day</span>
+                    <span class="legend-item up">
+                        <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+                        <span>UP Day</span>
+                    </span>
+                    <span class="legend-item down">
+                        <i data-lucide="arrow-down-right" aria-hidden="true"></i>
+                        <span>DOWN Day</span>
+                    </span>
                 </div>
             </div>
             <div class="chart-container">
@@ -197,7 +210,10 @@
         <!-- Predictions Table -->
         <section class="predictions-table glass" id="table-section">
             <div class="table-header">
-                <h2>📋 Daily Predictions</h2>
+                <h2 class="section-title">
+                    <i data-lucide="table-properties" aria-hidden="true"></i>
+                    <span>Daily Predictions</span>
+                </h2>
                 <button class="btn-secondary" id="export-btn">
                     Export CSV
                 </button>
@@ -221,8 +237,13 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>⚠️ <strong>Disclaimer:</strong> This is an experimental tool for educational purposes only.
-                Not financial advice. Past astrological correlations do not guarantee future results.</p>
+            <p class="footer-warning">
+                <i data-lucide="triangle-alert" aria-hidden="true"></i>
+                <span>
+                    <strong>Disclaimer:</strong> This is an experimental tool for educational purposes only.
+                    Not financial advice. Past astrological correlations do not guarantee future results.
+                </span>
+            </p>
             <p class="footer-meta">
                 Bitcoin Astro Predictor v2.0 | Model: XGBoost + Swiss Ephemeris + TP Segment Statistical Validation
             </p>

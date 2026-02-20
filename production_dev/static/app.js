@@ -1,10 +1,6 @@
 /**
  * Bitcoin Astro Predictor - Frontend Entry Point
  *
- * This file is intentionally small.
- * Big files become impossible to reason about and the project rules require
- * each module to stay under 500 lines.
- *
  * Main responsibilities:
  * - bind DOM elements
  * - wire event listeners
@@ -22,6 +18,7 @@ import {
     updateBacktestSliderLabel,
     updateForecastSliderLabel,
     updateForecastTable,
+    renderLucideIcons,
 } from './js/ui.js';
 import { exportForecastToCSV } from './js/csv.js';
 
@@ -41,7 +38,7 @@ async function refreshLiveData({ rebuild = false } = {}) {
 }
 
 function setupEventListeners() {
-    // History slider (how many past days to SHOW)
+    // History slider (how many past days to show)
     elements.backtestSlider?.addEventListener('input', (e) => {
         const days = Number(e.target.value);
         state.backtestDays = days;
@@ -49,7 +46,7 @@ function setupEventListeners() {
         rebuildChart();
     });
 
-    // Forecast slider (how many future days to SHOW)
+    // Forecast slider (how many future days to show)
     elements.daysSlider?.addEventListener('input', (e) => {
         const days = Number(e.target.value);
         state.forecastDays = days;
@@ -78,7 +75,7 @@ function setupEventListeners() {
             rebuildChart();
             updateForecastTable(preds);
 
-            // Ensure table is visible (in case CSS hides it in the future)
+            // Ensure table is visible (in case CSS hides it later).
             if (elements.tableSection) elements.tableSection.style.display = 'block';
         } catch (error) {
             console.error('Forecast generation failed:', error);
@@ -95,11 +92,12 @@ function setupEventListeners() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🚀 Bitcoin Astro Predictor - Initializing...');
+    console.log('[UI] Bitcoin Astro Predictor - Initializing...');
 
     bindElements();
+    renderLucideIcons();
 
-    // Read slider defaults from the DOM (so HTML is the single source of truth).
+    // Read slider defaults from the DOM.
     state.backtestDays = Number(elements.backtestSlider?.value || state.backtestDays);
     state.forecastDays = Number(elements.daysSlider?.value || state.forecastDays);
     updateBacktestSliderLabel(state.backtestDays);
@@ -113,7 +111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Build initial chart (uses cached data if available).
     rebuildChart();
 
-    // Keep header badges and chart metadata aligned with daily retrain/cache refresh.
+    // Keep header badges and chart metadata aligned with refresh cycles.
     setInterval(async () => {
         try {
             await refreshLiveData({ rebuild: true });
@@ -134,7 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    console.log('✅ Initialization complete');
+    console.log('[UI] Initialization complete');
 });
 
 // Global error trap to make debugging easier for non-dev users.
